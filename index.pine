@@ -5,7 +5,7 @@ indicator("Casey's Strategy implemented by SaadPro", overlay=true, max_boxes_cou
 pm_session = input.session("0400-0930", "Premarket Time")
 yd_session = input.session("0930-1600", "Yesterday Time")
 tf_input   = input.timeframe("15", "Zone Calculation Timeframe")
-zone_color = input.color(color.new(color.orange, 80), "YDH/YDL Zone Color")
+zone_color = input.color(color.new(color.orange, 80), "PDH/PDL Zone Color")
 
 // --- Multi-Timeframe Data Request ---
 [mtf_high, mtf_low, mtf_open, mtf_close] = request.security(syminfo.tickerid, tf_input, [high, low, open, close], lookahead=barmerge.lookahead_on)
@@ -73,12 +73,12 @@ if not na(locked_pml)
     l_pml := line.new(locked_pml_idx, locked_pml, bar_index + 10, locked_pml, color=color.gray)
     lb_pml := label.new(bar_index + 11, locked_pml, "PML • " + str.tostring(locked_pml, "#.##"), style=label.style_none, textcolor=color.gray, size=size.small)
 
-// Draw YDH/YDL (Orange) + MTF Zones
+// Draw PDH/PDL (Orange) + MTF Zones
 if not na(locked_ydh)
     l_ydh := line.new(locked_ydh_idx, locked_ydh, bar_index + 10, locked_ydh, color=color.orange, width=2)
-    lb_ydh := label.new(bar_index + 11, locked_ydh, "YDH • " + str.tostring(locked_ydh, "#.##"), style=label.style_none, textcolor=color.orange, size=size.small)
+    lb_ydh := label.new(bar_index + 11, locked_ydh, "PDH • " + str.tostring(locked_ydh, "#.##"), style=label.style_none, textcolor=color.orange, size=size.small)
     b_ydh := box.new(locked_ydh_idx, locked_ydh, bar_index + 10, locked_ydh_body, bgcolor=zone_color, border_color=color.new(color.orange, 100))
 if not na(locked_ydl)
     l_ydl := line.new(locked_ydl_idx, locked_ydl, bar_index + 10, locked_ydl, color=color.orange, width=2)
-    lb_ydl := label.new(bar_index + 11, locked_ydl, "YDL • " + str.tostring(locked_ydl, "#.##"), style=label.style_none, textcolor=color.orange, size=size.small)
+    lb_ydl := label.new(bar_index + 11, locked_ydl, "PDL • " + str.tostring(locked_ydl, "#.##"), style=label.style_none, textcolor=color.orange, size=size.small)
     b_ydl := box.new(locked_ydl_idx, locked_ydl, bar_index + 10, locked_ydl_body, bgcolor=zone_color, border_color=color.new(color.orange, 100))

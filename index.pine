@@ -1,5 +1,5 @@
 //@version=5
-indicator("Casey's Strategy Implemented by SaadPro", overlay=true, max_boxes_count=500, max_lines_count=500)
+indicator("Casey's Strategy implemented by SaadPro", overlay=true, max_boxes_count=500, max_lines_count=500)
 
 // --- Inputs ---
 pm_session = input.session("0400-0930", "Premarket Time")
@@ -60,25 +60,25 @@ var label lb_pmh = na, var label lb_pml = na
 var label lb_ydh = na, var label lb_ydl = na
 var box b_ydh = na, var box b_ydl = na
 
-if barstate.islast
-    line.delete(l_pmh), line.delete(l_pml), line.delete(l_ydh), line.delete(l_ydl)
-    label.delete(lb_pmh), label.delete(lb_pml), label.delete(lb_ydh), label.delete(lb_ydl)
-    box.delete(b_ydh), box.delete(b_ydl)
+// This block now runs on every bar so drawings show up in Bar Replay
+line.delete(l_pmh), line.delete(l_pml), line.delete(l_ydh), line.delete(l_ydl)
+label.delete(lb_pmh), label.delete(lb_pml), label.delete(lb_ydh), label.delete(lb_ydl)
+box.delete(b_ydh), box.delete(b_ydl)
 
-    // Draw PMH/PML (Gray)
-    if not na(locked_pmh)
-        l_pmh := line.new(locked_pmh_idx, locked_pmh, bar_index + 10, locked_pmh, color=color.gray)
-        lb_pmh := label.new(bar_index + 11, locked_pmh, "PMH • " + str.tostring(locked_pmh, "#.##"), style=label.style_none, textcolor=color.gray, size=size.small)
-    if not na(locked_pml)
-        l_pml := line.new(locked_pml_idx, locked_pml, bar_index + 10, locked_pml, color=color.gray)
-        lb_pml := label.new(bar_index + 11, locked_pml, "PML • " + str.tostring(locked_pml, "#.##"), style=label.style_none, textcolor=color.gray, size=size.small)
+// Draw PMH/PML (Gray)
+if not na(locked_pmh)
+    l_pmh := line.new(locked_pmh_idx, locked_pmh, bar_index + 10, locked_pmh, color=color.gray)
+    lb_pmh := label.new(bar_index + 11, locked_pmh, "PMH • " + str.tostring(locked_pmh, "#.##"), style=label.style_none, textcolor=color.gray, size=size.small)
+if not na(locked_pml)
+    l_pml := line.new(locked_pml_idx, locked_pml, bar_index + 10, locked_pml, color=color.gray)
+    lb_pml := label.new(bar_index + 11, locked_pml, "PML • " + str.tostring(locked_pml, "#.##"), style=label.style_none, textcolor=color.gray, size=size.small)
 
-    // Draw YDH/YDL (Orange) + MTF Zones
-    if not na(locked_ydh)
-        l_ydh := line.new(locked_ydh_idx, locked_ydh, bar_index + 10, locked_ydh, color=color.orange, width=2)
-        lb_ydh := label.new(bar_index + 11, locked_ydh, "YDH • " + str.tostring(locked_ydh, "#.##"), style=label.style_none, textcolor=color.orange, size=size.small)
-        b_ydh := box.new(locked_ydh_idx, locked_ydh, bar_index + 10, locked_ydh_body, bgcolor=zone_color, border_color=color.new(color.orange, 100))
-    if not na(locked_ydl)
-        l_ydl := line.new(locked_ydl_idx, locked_ydl, bar_index + 10, locked_ydl, color=color.orange, width=2)
-        lb_ydl := label.new(bar_index + 11, locked_ydl, "YDL • " + str.tostring(locked_ydl, "#.##"), style=label.style_none, textcolor=color.orange, size=size.small)
-        b_ydl := box.new(locked_ydl_idx, locked_ydl, bar_index + 10, locked_ydl_body, bgcolor=zone_color, border_color=color.new(color.orange, 100))
+// Draw YDH/YDL (Orange) + MTF Zones
+if not na(locked_ydh)
+    l_ydh := line.new(locked_ydh_idx, locked_ydh, bar_index + 10, locked_ydh, color=color.orange, width=2)
+    lb_ydh := label.new(bar_index + 11, locked_ydh, "YDH • " + str.tostring(locked_ydh, "#.##"), style=label.style_none, textcolor=color.orange, size=size.small)
+    b_ydh := box.new(locked_ydh_idx, locked_ydh, bar_index + 10, locked_ydh_body, bgcolor=zone_color, border_color=color.new(color.orange, 100))
+if not na(locked_ydl)
+    l_ydl := line.new(locked_ydl_idx, locked_ydl, bar_index + 10, locked_ydl, color=color.orange, width=2)
+    lb_ydl := label.new(bar_index + 11, locked_ydl, "YDL • " + str.tostring(locked_ydl, "#.##"), style=label.style_none, textcolor=color.orange, size=size.small)
+    b_ydl := box.new(locked_ydl_idx, locked_ydl, bar_index + 10, locked_ydl_body, bgcolor=zone_color, border_color=color.new(color.orange, 100))

@@ -1,0 +1,84 @@
+//@version=5
+indicator("Casey's Strategy Implemented by SaadPro", overlay=true, max_boxes_count=500, max_lines_count=500)
+
+// --- Inputs ---
+pm_session = input.session("0400-0930", "Premarket Time")
+yd_session = input.session("0930-1600", "Yesterday Time")
+tf_input   = input.timeframe("15", "Zone Calculation Timeframe")
+zone_color = input.color(color.new(color.orange, 80), "YDH/YDL Zone Color")
+
+// --- Multi-Timeframe Data Request ---
+[mtf_high, mtf_low, mtf_open, mtf_close] = request.security(syminfo.tickerid, tf_input, [high, low, open, close], lookahead=barmerge.lookahead_on)
+
+// --- Variables ---
+var float cur_pmh = na, var int cur_pmh_idx = na
+var float cur_pml = na, var int cur_pml_idx = na
+var float locked_pmh = na, var int locked_pmh_idx = na
+var float locked_pml = na, var int locked_pml_idx = na
+
+var float cur_ydh = na, var int cur_ydh_idx = na, var float cur_ydh_body = na
+var float cur_ydl = na, var int cur_ydl_idx = na, var float cur_ydl_body = na
+var float locked_ydh = na, var int locked_ydh_idx = na, var float locked_ydh_body = na
+var float locked_ydl = na, var int locked_ydl_idx = na, var float locked_ydl_body = na
+
+// --- Logic ---
+is_pm = not na(time(timeframe.period, pm_session, "America/New_York"))
+is_yd = not na(time(timeframe.period, yd_session, "America/New_York"))
+
+// 1. Premarket Tracking
+if is_pm
+    if not is_pm[1]
+        cur_pmh := high, cur_pmh_idx := bar_index
+        cur_pml := low,  cur_pml_idx := bar_index
+    else
+        if high >= cur_pmh
+            cur_pmh := high, cur_pmh_idx := bar_index
+        if low <= cur_pml
+            cur_pml := low,  cur_pml_idx := bar_index
+else if is_pm[1]
+    locked_pmh := cur_pmh, locked_pmh_idx := cur_pmh_idx
+    locked_pml := cur_pml, locked_pml_idx := cur_pml_idx
+
+// 2. Yesterday Tracking + MTF Body Capture
+if is_yd
+    if not is_yd[1]
+        cur_ydh := high, cur_ydh_idx := bar_index, cur_ydh_body := math.max(mtf_open, mtf_close)
+        cur_ydl := low,  cur_ydl_idx := bar_index, cur_ydl_body := math.min(mtf_open, mtf_close)
+    else
+        if high >= cur_ydh
+            cur_ydh := high, cur_ydh_idx := bar_index, cur_ydh_body := math.max(mtf_open, mtf_close)
+        if low <= cur_ydl
+            cur_ydl := low,  cur_ydl_idx := bar_index, cur_ydl_body := math.min(mtf_open, mtf_close)
+else if is_yd[1]
+    locked_ydh := cur_ydh, locked_ydh_idx := cur_ydh_idx, locked_ydh_body := cur_ydh_body
+    locked_ydl := cur_ydl, locked_ydl_idx := cur_ydl_idx, locked_ydl_body := cur_ydl_body
+
+// --- Drawing Logic ---
+var line l_pmh = na, var line l_pml = na
+var line l_ydh = na, var line l_ydl = na
+var label lb_pmh = na, var label lb_pml = na
+var label lb_ydh = na, var label lb_ydl = na
+var box b_ydh = na, var box b_ydl = na
+
+if barstate.islast
+    line.delete(l_pmh), line.delete(l_pml), line.delete(l_ydh), line.delete(l_ydl)
+    label.delete(lb_pmh), label.delete(lb_pml), label.delete(lb_ydh), label.delete(lb_ydl)
+    box.delete(b_ydh), box.delete(b_ydl)
+
+    // Draw PMH/PML (Gray)
+    if not na(locked_pmh)
+        l_pmh := line.new(locked_pmh_idx, locked_pmh, bar_index + 10, locked_pmh, color=color.gray)
+        lb_pmh := label.new(bar_index + 11, locked_pmh, "PMH • " + str.tostring(locked_pmh, "#.##"), style=label.style_none, textcolor=color.gray, size=size.small)
+    if not na(locked_pml)
+        l_pml := line.new(locked_pml_idx, locked_pml, bar_index + 10, locked_pml, color=color.gray)
+        lb_pml := label.new(bar_index + 11, locked_pml, "PML • " + str.tostring(locked_pml, "#.##"), style=label.style_none, textcolor=color.gray, size=size.small)
+
+    // Draw YDH/YDL (Orange) + MTF Zones
+    if not na(locked_ydh)
+        l_ydh := line.new(locked_ydh_idx, locked_ydh, bar_index + 10, locked_ydh, color=color.orange, width=2)
+        lb_ydh := label.new(bar_index + 11, locked_ydh, "YDH • " + str.tostring(locked_ydh, "#.##"), style=label.style_none, textcolor=color.orange, size=size.small)
+        b_ydh := box.new(locked_ydh_idx, locked_ydh, bar_index + 10, locked_ydh_body, bgcolor=zone_color, border_color=color.new(color.orange, 100))
+    if not na(locked_ydl)
+        l_ydl := line.new(locked_ydl_idx, locked_ydl, bar_index + 10, locked_ydl, color=color.orange, width=2)
+        lb_ydl := label.new(bar_index + 11, locked_ydl, "YDL • " + str.tostring(locked_ydl, "#.##"), style=label.style_none, textcolor=color.orange, size=size.small)
+        b_ydl := box.new(locked_ydl_idx, locked_ydl, bar_index + 10, locked_ydl_body, bgcolor=zone_color, border_color=color.new(color.orange, 100))

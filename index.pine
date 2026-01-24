@@ -2,123 +2,109 @@
 indicator("Casey's Strategy implemented by SaadPro", overlay=true, max_boxes_count=500, max_lines_count=500)
 
 // --- Inputs ---
-// Define the specific time sessions for Premarket and Regular Trading Hours
 pm_session = input.session("0400-0930", "Premarket Time")
-yd_session = input.session("0930-1600", "Yesterday Time")
-// Timeframe used to calculate the "body" of the zones (default 15 min)
+yd_session = input.session("0930-1600", "Regular Session Time")
 tf_input   = input.timeframe("15", "Zone Calculation Timeframe")
 
-// Visibility Toggles: Allow user to turn off specific levels
-show_pm  = input.bool(true, "Show Premarket (PMH/L)", group="Visibility")
-show_yd  = input.bool(true, "Show Yesterday (PDH/L)", group="Visibility")
-show_dby = input.bool(true, "Show Day Before Yesterday (DBPH/L)", group="Visibility")
+show_pm   = input.bool(true, "Show Premarket (PMH/L)")
+show_yd   = input.bool(true, "Show Yesterday (PDH/L)")
+show_dby  = input.bool(true, "Show Day Before Yesterday (DBPH/L)")
 
-// Color Inputs: Customization for lines and zone transparency
-pm_color    = input.color(color.rgb(94, 159, 212), "Premarket Line Color", group="Colors")
-yd_color    = input.color(color.rgb(94, 159, 212), "Yesterday Line Color", group="Colors")
-dby_color   = input.color(color.rgb(94, 159, 212), "Day Before Yesterday Color", group="Colors")
-zone_transp = input.int(85, "Zone Transparency (0-100)", minval=0, maxval=100, group="Colors")
+pm_color    = input.color(#4b0082, "Premarket Color")
+yd_color    = input.color(color.green, "Yesterday Color")
+dby_color   = input.color(color.aqua, "DBY Color")
+zone_transp = input.int(85, "Zone Transparency", minval=0, maxval=100)
 
-// --- Multi-Timeframe Data Request ---
-// Fetch High, Low, Open, and Close from the user-defined timeframe (e.g., 15m)
-// barmerge.lookahead_on is used to ensure historical levels are calculated accurately
+// --- Data ---
 [mtf_high, mtf_low, mtf_open, mtf_close] = request.security(syminfo.tickerid, tf_input, [high, low, open, close], lookahead=barmerge.lookahead_on)
 
-// --- Variables ---
-// 'var' keyword ensures these values persist across bars
-// 'cur_' variables track the current session's high/low
-// 'locked_' variables store the finalized high/low once a session ends
-var float cur_pmh = na, var int cur_pmh_idx = na
-var float cur_pml = na, var int cur_pml_idx = na
-var float locked_pmh = na, var int locked_pmh_idx = na
-var float locked_pml = na, var int locked_pml_idx = na
+// --- Storage Variables ---
+// Current Session Trackers
+var float c_h = na, var int c_h_idx = na, var float c_body_h = na
+var float c_l = na, var int c_l_idx = na, var float c_body_l = na
 
-var float cur_ydh = na, var int cur_ydh_idx = na, var float cur_ydh_body = na
-var float cur_ydl = na, var int cur_ydl_idx = na, var float cur_ydl_body = na
-var float locked_ydh = na, var int locked_ydh_idx = na, var float locked_ydh_body = na
-var float locked_ydl = na, var int locked_ydl_idx = na, var float locked_ydl_body = na
+// Yesterday (PDH/L) - Thursday if today is Friday
+var float y_h = na, var int y_h_idx = na, var float y_body_h = na
+var float y_l = na, var int y_l_idx = na, var float y_body_l = na
 
-var float locked_dbyh = na, var int locked_dbyh_idx = na, var float locked_dbyh_body = na
-var float locked_dbyl = na, var int locked_dbyl_idx = na, var float locked_dbyl_body = na
+// Day Before (DBPH/L) - Wednesday if today is Friday
+var float dby_h = na, var int dby_h_idx = na, var float dby_body_h = na
+var float dby_l = na, var int dby_l_idx = na, var float dby_body_l = na
+
+// Premarket
+var float pm_h = na, var int pm_h_idx = na
+var float pm_l = na, var int pm_l_idx = na
 
 // --- Logic ---
-// Check if the current bar falls within the defined sessions
 is_pm = not na(time(timeframe.period, pm_session, "America/New_York"))
 is_yd = not na(time(timeframe.period, yd_session, "America/New_York"))
 
-// 1. Premarket Tracking
+// 1. Premarket Logic
 if is_pm
-    if not is_pm[1] // Session just started: Reset high/low
-        cur_pmh := high, cur_pmh_idx := bar_index
-        cur_pml := low,  cur_pml_idx := bar_index
-    else // Session in progress: Update if new highs/lows are made
-        if high >= cur_pmh
-            cur_pmh := high, cur_pmh_idx := bar_index
-        if low <= cur_pml
-            cur_pml := low,  cur_pml_idx := bar_index
-else if is_pm[1] // Session just ended: Lock the values for the day
-    locked_pmh := cur_pmh, locked_pmh_idx := cur_pmh_idx
-    locked_pml := cur_pml, locked_pml_idx := cur_pml_idx
+    if not is_pm[1]
+        pm_h := high, pm_h_idx := bar_index
+        pm_l := low,  pm_l_idx := bar_index
+    else
+        if high >= pm_h
+            pm_h := high, pm_h_idx := bar_index
+        if low <= pm_l
+            pm_l := low,  pm_l_idx := bar_index
 
-// 2. Yesterday & Day Before Yesterday Tracking
+// 2. Main Session Logic & Shifting
 if is_yd
-    if not is_yd[1] // New trading day starts
-        // Move previous "Yesterday" data into "Day Before Yesterday" slots
-        locked_dbyh := locked_ydh, locked_dbyh_idx := locked_ydh_idx, locked_dbyh_body := locked_ydh_body
-        locked_dbyl := locked_ydl, locked_dbyl_idx := locked_ydl_idx, locked_dbyl_body := locked_ydl_body
+    if not is_yd[1]
+        // AT 09:30 AM (New Session Start):
+        // First: Move Yesterday's data to Day Before Yesterday (Wednesday becomes DBY)
+        dby_h := y_h, dby_h_idx := y_h_idx, dby_body_h := y_body_h
+        dby_l := y_l, dby_l_idx := y_l_idx, dby_body_l := y_body_l
         
-        // Reset current tracker for the new session
-        cur_ydh := high, cur_ydh_idx := bar_index, cur_ydh_body := math.max(mtf_open, mtf_close)
-        cur_ydl := low,  cur_ydl_idx := bar_index, cur_ydl_body := math.min(mtf_open, mtf_close)
-    else // Session in progress: Update high/low and the candle body price (for zones)
-        if high >= cur_ydh
-            cur_ydh := high, cur_ydh_idx := bar_index, cur_ydh_body := math.max(mtf_open, mtf_close)
-        if low <= cur_ydl
-            cur_ydl := low,  cur_ydl_idx := bar_index, cur_ydl_body := math.min(mtf_open, mtf_close)
-else if is_yd[1] // Session ended: Lock values
-    locked_ydh := cur_ydh, locked_ydh_idx := cur_ydh_idx, locked_ydh_body := cur_ydh_body
-    locked_ydl := cur_ydl, locked_ydl_idx := cur_ydl_idx, locked_ydl_body := cur_ydl_body
+        // Second: Move the just-finished session's data to Yesterday (Thursday becomes Yesterday)
+        y_h := c_h, y_h_idx := c_h_idx, y_body_h := c_body_h
+        y_l := c_l, y_l_idx := c_l_idx, y_body_l := c_body_l
+        
+        // Third: Reset Current Session for today (Friday)
+        c_h := high, c_h_idx := bar_index, c_body_h := math.max(mtf_open, mtf_close)
+        c_l := low,  c_l_idx := bar_index, c_body_l := math.min(mtf_open, mtf_close)
+    else
+        // Update today's tracking
+        if high >= c_h
+            c_h := high, c_h_idx := bar_index, c_body_h := math.max(mtf_open, mtf_close)
+        if low <= c_l
+            c_l := low,  c_l_idx := bar_index, c_body_l := math.min(mtf_open, mtf_close)
 
-// --- Drawing Logic ---
-// Initialize drawing objects
-var line l_pmh = na, var line l_pml = na
-var line l_ydh = na, var line l_ydl = na
+// --- Rendering ---
+var line l_pmh = na,  var line l_pml = na
+var line l_ydh = na,  var line l_ydl = na
 var line l_dbyh = na, var line l_dbyl = na
-var label lb_pmh = na, var label lb_pml = na
-var label lb_ydh = na, var label lb_ydl = na
-var label lb_dbyh = na, var label lb_dbyl = na
-var box b_ydh = na, var box b_ydl = na
-var box b_dbyh = na, var box b_dbyl = na
+var box b_ydh = na,   var box b_ydl = na
+var box b_dbyh = na,  var box b_dbyl = na
 
-// Cleanup: Delete existing drawings so they refresh on every bar (prevents ghost lines)
-line.delete(l_pmh), line.delete(l_pml), line.delete(l_ydh), line.delete(l_ydl), line.delete(l_dbyh), line.delete(l_dbyl)
-label.delete(lb_pmh), label.delete(lb_pml), label.delete(lb_ydh), label.delete(lb_ydl), label.delete(lb_dbyh), label.delete(lb_dbyl)
-box.delete(b_ydh), box.delete(b_ydl), box.delete(b_dbyh), box.delete(b_dbyl)
+line.delete(l_pmh), line.delete(l_pml)
+line.delete(l_ydh), line.delete(l_ydl)
+line.delete(l_dbyh), line.delete(l_dbyl)
+box.delete(b_ydh), box.delete(b_ydl)
+box.delete(b_dbyh), box.delete(b_dbyl)
 
-// Draw PMH/PML: Creates a dotted line from where it occurred to the right of the screen
-if show_pm and not na(locked_pmh)
-    l_pmh := line.new(locked_pmh_idx, locked_pmh, bar_index + 10, locked_pmh, color=pm_color, style=line.style_dotted)
-    lb_pmh := label.new(bar_index + 11, locked_pmh, "PMH • " + str.tostring(locked_pmh, "#.##"), style=label.style_none, textcolor=pm_color, size=size.small)
-if show_pm and not na(locked_pml)
-    l_pml := line.new(locked_pml_idx, locked_pml, bar_index + 10, locked_pml, color=pm_color, style=line.style_dotted)
-    lb_pml := label.new(bar_index + 11, locked_pml, "PML • " + str.tostring(locked_pml, "#.##"), style=label.style_none, textcolor=pm_color, size=size.small)
+// Colors
+c_none = color.new(color.white, 100)
+c_yd_bg = color.new(yd_color, zone_transp)
+c_dby_bg = color.new(dby_color, zone_transp)
 
-// Draw PDH/PDL (Yesterday): Creates a solid line and a shaded box (zone) between high/low and the candle body
-if show_yd and not na(locked_ydh)
-    l_ydh := line.new(locked_ydh_idx, locked_ydh, bar_index + 10, locked_ydh, color=yd_color, width=2)
-    lb_ydh := label.new(bar_index + 11, locked_ydh, "PDH • " + str.tostring(locked_ydh, "#.##"), style=label.style_none, textcolor=yd_color, size=size.small)
-    b_ydh := box.new(locked_ydh_idx, locked_ydh, bar_index + 10, locked_ydh_body, bgcolor=color.new(yd_color, zone_transp), border_color=color.new(yd_color, 100))
-if show_yd and not na(locked_ydl)
-    l_ydl := line.new(locked_ydl_idx, locked_ydl, bar_index + 10, locked_ydl, color=yd_color, width=2)
-    lb_ydl := label.new(bar_index + 11, locked_ydl, "PDL • " + str.tostring(locked_ydl, "#.##"), style=label.style_none, textcolor=yd_color, size=size.small)
-    b_ydl := box.new(locked_ydl_idx, locked_ydl, bar_index + 10, locked_ydl_body, bgcolor=color.new(yd_color, zone_transp), border_color=color.new(yd_color, 100))
+// Draw DBY (Wednesday)
+if show_dby and not na(dby_h)
+    l_dbyh := line.new(dby_h_idx, dby_h, bar_index + 5, dby_h, color=dby_color, width=3)
+    b_dbyh := box.new(dby_h_idx, dby_h, bar_index + 5, dby_body_h, bgcolor=c_dby_bg, border_color=c_none)
+    l_dbyl := line.new(dby_l_idx, dby_l, bar_index + 5, dby_l, color=dby_color, width=3)
+    b_dbyl := box.new(dby_l_idx, dby_l, bar_index + 5, dby_body_l, bgcolor=c_dby_bg, border_color=c_none)
 
-// Draw DBY High/Low (Day Before Yesterday): Same as above but for the older day
-if show_dby and not na(locked_dbyh)
-    l_dbyh := line.new(locked_dbyh_idx, locked_dbyh, bar_index + 10, locked_dbyh, color=dby_color, width=1)
-    lb_dbyh := label.new(bar_index + 11, locked_dbyh, "DBPH • " + str.tostring(locked_dbyh, "#.##"), style=label.style_none, textcolor=dby_color, size=size.small)
-    b_dbyh := box.new(locked_dbyh_idx, locked_dbyh, bar_index + 10, locked_dbyh_body, bgcolor=color.new(dby_color, zone_transp), border_color=color.new(dby_color, 100))
-if show_dby and not na(locked_dbyl)
-    l_dbyl := line.new(locked_dbyl_idx, locked_dbyl, bar_index + 10, locked_dbyl, color=dby_color, width=1)
-    lb_dbyl := label.new(bar_index + 11, locked_dbyl, "DBPL • " + str.tostring(locked_dbyl, "#.##"), style=label.style_none, textcolor=dby_color, size=size.small)
-    b_dbyl := box.new(locked_dbyl_idx, locked_dbyl, bar_index + 10, locked_dbyl_body, bgcolor=color.new(dby_color, zone_transp), border_color=color.new(dby_color, 100))
+// Draw Yesterday (Thursday)
+if show_yd and not na(y_h)
+    l_ydh := line.new(y_h_idx, y_h, bar_index + 5, y_h, color=yd_color, width=3)
+    b_ydh := box.new(y_h_idx, y_h, bar_index + 5, y_body_h, bgcolor=c_yd_bg, border_color=c_none)
+    l_ydl := line.new(y_l_idx, y_l, bar_index + 5, y_l, color=yd_color, width=3)
+    b_ydl := box.new(y_l_idx, y_l, bar_index + 5, y_body_l, bgcolor=c_yd_bg, border_color=c_none)
+
+// Draw PM
+if show_pm and not na(pm_h)
+    l_pmh := line.new(pm_h_idx, pm_h, bar_index + 5, pm_h, color=pm_color, width=3)
+    l_pml := line.new(pm_l_idx, pm_l, bar_index + 5, pm_l, color=pm_color, width=3)

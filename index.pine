@@ -10,10 +10,10 @@ show_pm   = input.bool(true, "Show Premarket (PMH/L)")
 show_yd   = input.bool(true, "Show Yesterday (PDH/L)")
 show_dby  = input.bool(true, "Show Day Before Yesterday (DBPH/L)")
 
-pm_color    = input.color(#4b0082, "Premarket Color")
-yd_color    = input.color(color.green, "Yesterday Color")
-dby_color   = input.color(color.aqua, "DBY Color")
-zone_transp = input.int(85, "Zone Transparency", minval=0, maxval=100)
+pm_color    = input.color(color.rgb(53, 136, 209), "Premarket Color")
+yd_color    = input.color(color.rgb(53, 136, 209), "Yesterday Color")
+dby_color   = input.color(color.rgb(53, 136, 209), "DBY Color")
+zone_transp = input.int(90, "Zone Transparency", minval=0, maxval=100)
 
 // --- Data ---
 [mtf_high, mtf_low, mtf_open, mtf_close] = request.security(syminfo.tickerid, tf_input, [high, low, open, close], lookahead=barmerge.lookahead_on)
@@ -78,33 +78,53 @@ var line l_ydh = na,  var line l_ydl = na
 var line l_dbyh = na, var line l_dbyl = na
 var box b_ydh = na,   var box b_ydl = na
 var box b_dbyh = na,  var box b_dbyl = na
+var label lbl_pmh = na, var label lbl_pml = na
+var label lbl_ydh = na, var label lbl_ydl = na
+var label lbl_dbyh = na, var label lbl_dbyl = na
 
+// Cleanup
 line.delete(l_pmh), line.delete(l_pml)
 line.delete(l_ydh), line.delete(l_ydl)
 line.delete(l_dbyh), line.delete(l_dbyl)
 box.delete(b_ydh), box.delete(b_ydl)
 box.delete(b_dbyh), box.delete(b_dbyl)
+label.delete(lbl_pmh), label.delete(lbl_pml)
+label.delete(lbl_ydh), label.delete(lbl_ydl)
+label.delete(lbl_dbyh), label.delete(lbl_dbyl)
 
 // Colors
 c_none = color.new(color.white, 100)
 c_yd_bg = color.new(yd_color, zone_transp)
 c_dby_bg = color.new(dby_color, zone_transp)
+label_x = bar_index + 5
 
-// Draw DBY (Wednesday)
+// Function for formatting labels to keep code clean
+f_get_label(_txt, _val) => _txt + ": " + str.tostring(_val, format.mintick)
+
+// --- Draw DBY (Wednesday if Today is Friday) ---
 if show_dby and not na(dby_h)
-    l_dbyh := line.new(dby_h_idx, dby_h, bar_index + 5, dby_h, color=dby_color, width=3)
-    b_dbyh := box.new(dby_h_idx, dby_h, bar_index + 5, dby_body_h, bgcolor=c_dby_bg, border_color=c_none)
-    l_dbyl := line.new(dby_l_idx, dby_l, bar_index + 5, dby_l, color=dby_color, width=3)
-    b_dbyl := box.new(dby_l_idx, dby_l, bar_index + 5, dby_body_l, bgcolor=c_dby_bg, border_color=c_none)
+    l_dbyh := line.new(dby_h_idx, dby_h, label_x, dby_h, color=dby_color, width=1)
+    b_dbyh := box.new(dby_h_idx, dby_h, label_x, dby_body_h, bgcolor=c_dby_bg, border_color=c_none)
+    lbl_dbyh := label.new(label_x, dby_h, f_get_label("DBPH", dby_h), color=c_none, textcolor=dby_color, style=label.style_label_left)
+    
+    l_dbyl := line.new(dby_l_idx, dby_l, label_x, dby_l, color=dby_color, width=1)
+    b_dbyl := box.new(dby_l_idx, dby_l, label_x, dby_body_l, bgcolor=c_dby_bg, border_color=c_none)
+    lbl_dbyl := label.new(label_x, dby_l, f_get_label("DBPL", dby_l), color=c_none, textcolor=dby_color, style=label.style_label_left)
 
-// Draw Yesterday (Thursday)
+// --- Draw Yesterday (Thursday if Today is Friday) ---
 if show_yd and not na(y_h)
-    l_ydh := line.new(y_h_idx, y_h, bar_index + 5, y_h, color=yd_color, width=3)
-    b_ydh := box.new(y_h_idx, y_h, bar_index + 5, y_body_h, bgcolor=c_yd_bg, border_color=c_none)
-    l_ydl := line.new(y_l_idx, y_l, bar_index + 5, y_l, color=yd_color, width=3)
-    b_ydl := box.new(y_l_idx, y_l, bar_index + 5, y_body_l, bgcolor=c_yd_bg, border_color=c_none)
+    l_ydh := line.new(y_h_idx, y_h, label_x, y_h, color=yd_color, width=1)
+    b_ydh := box.new(y_h_idx, y_h, label_x, y_body_h, bgcolor=c_yd_bg, border_color=c_none)
+    lbl_ydh := label.new(label_x, y_h, f_get_label("PDH", y_h), color=c_none, textcolor=yd_color, style=label.style_label_left)
+    
+    l_ydl := line.new(y_l_idx, y_l, label_x, y_l, color=yd_color, width=1)
+    b_ydl := box.new(y_l_idx, y_l, label_x, y_body_l, bgcolor=c_yd_bg, border_color=c_none)
+    lbl_ydl := label.new(label_x, y_l, f_get_label("PDL", y_l), color=c_none, textcolor=yd_color, style=label.style_label_left)
 
-// Draw PM
+// --- Draw Premarket ---
 if show_pm and not na(pm_h)
-    l_pmh := line.new(pm_h_idx, pm_h, bar_index + 5, pm_h, color=pm_color, width=3)
-    l_pml := line.new(pm_l_idx, pm_l, bar_index + 5, pm_l, color=pm_color, width=3)
+    l_pmh := line.new(pm_h_idx, pm_h, label_x, pm_h, color=pm_color, width=1,style=line.style_dotted)
+    lbl_pmh := label.new(label_x, pm_h, f_get_label("PMH", pm_h), color=c_none, textcolor=pm_color, style=label.style_label_left)
+    
+    l_pml := line.new(pm_l_idx, pm_l, label_x, pm_l, color=pm_color, width=1,style=line.style_dotted)
+    lbl_pml := label.new(label_x, pm_l, f_get_label("PML", pm_l), color=c_none, textcolor=pm_color, style=label.style_label_left)

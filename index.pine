@@ -17,6 +17,29 @@ yd_color    = input.color(color.rgb(53, 136, 209), "Yesterday Color")
 dby_color   = input.color(color.rgb(53, 136, 209), "DBY Color")
 zone_transp = input.int(90, "Zone Transparency", minval=0, maxval=100)
 
+// --- EMA Settings ---
+show_ema13 = input.bool(false, "EMA 13", group="EMA 13", inline="ema13")
+ema13_color = input.color(color.yellow, "", group="EMA 13", inline="ema13")
+ema13_width = input.int(2, "", minval=1, maxval=4, group="EMA 13", inline="ema13")
+
+show_ema48 = input.bool(false, "EMA 48", group="EMA 48", inline="ema48")
+ema48_color = input.color(#641864, "", group="EMA 48", inline="ema48")
+ema48_width = input.int(2, "", minval=1, maxval=4, group="EMA 48", inline="ema48")
+
+show_ema200 = input.bool(false, "EMA 200", group="EMA 200", inline="ema200")
+ema200_color = input.color(#892828, "", group="EMA 200", inline="ema200")
+ema200_width = input.int(2, "", minval=1, maxval=4, group="EMA 200", inline="ema200")
+
+// --- Calculate EMAs ---
+ema13 = ta.ema(close, 13)
+ema48 = ta.ema(close, 48)
+ema200 = ta.ema(close, 200)
+
+// --- Plot EMAs ---
+plot(show_ema13 ? ema13 : na, "EMA 13", ema13_color, ema13_width)
+plot(show_ema48 ? ema48 : na, "EMA 48", ema48_color, ema48_width)
+plot(show_ema200 ? ema200 : na, "EMA 200", ema200_color, ema200_width)
+
 // --- MTF Data (only what we need) ---
 [mtf_open, mtf_close] = request.security(syminfo.tickerid, tf_input, [open, close], lookahead=barmerge.lookahead_on)
 
@@ -204,4 +227,3 @@ if show_pm and not na(pm_h)
     lbl_pmh := label.new(label_x, pm_h, f_get_label("PMH", pm_h), color=c_none, textcolor=pm_color, style=label.style_label_left)
     l_pml := line.new(pm_l_idx, pm_l, label_x, pm_l, color=pm_color, width=1, style=line.style_dotted)
     lbl_pml := label.new(label_x, pm_l, f_get_label("PML", pm_l), color=c_none, textcolor=pm_color, style=label.style_label_left)
-

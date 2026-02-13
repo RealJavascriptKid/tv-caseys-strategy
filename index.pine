@@ -10,13 +10,20 @@ show_pm   = input.bool(true, "Show Premarket (PMH/L)")
 show_yd   = input.bool(true, "Show Yesterday (PDH/L)")
 show_dby  = input.bool(true, "Show Day Before Yesterday (DBPH/L)")
 
+use_next_candle = input.bool(true, "Use Next higher Timeframe Candle Body for Zone (instead of current body)")
+
 pm_color    = input.color(color.rgb(53, 136, 209), "Premarket Color")
 yd_color    = input.color(color.rgb(53, 136, 209), "Yesterday Color")
 dby_color   = input.color(color.rgb(53, 136, 209), "DBY Color")
 zone_transp = input.int(90, "Zone Transparency", minval=0, maxval=100)
 
-// --- Data ---
-[mtf_high, mtf_low, mtf_open, mtf_close] = request.security(syminfo.tickerid, tf_input, [high, low, open, close], lookahead=barmerge.lookahead_on)
+// --- MTF Data (only what we need) ---
+[mtf_open, mtf_close] = request.security(syminfo.tickerid, tf_input, [open, close], lookahead=barmerge.lookahead_on)
+
+// --- How many chart bars in one MTF candle? ---
+chart_tf_sec  = timeframe.in_seconds(timeframe.period)
+mtf_tf_sec    = timeframe.in_seconds(tf_input)
+bars_per_mtf  = math.floor(mtf_tf_sec / chart_tf_sec)
 
 // --- Storage Variables ---
 var float c_h = na, var int c_h_idx = na, var float c_body_h = na
@@ -28,44 +35,126 @@ var float dby_l = na, var int dby_l_idx = na, var float dby_body_l = na
 var float pm_h = na, var int pm_h_idx = na
 var float pm_l = na, var int pm_l_idx = na
 
-// --- Logic ---
+// --- Pending trackers (only for "next candle" mode) ---
+var bool  c_pending_h = false, var int  c_pending_h_idx = na
+var bool  c_pending_l = false, var int  c_pending_l_idx = na
+var bool  y_pending_h = false, var int  y_pending_h_idx = na
+var bool  y_pending_l = false, var int  y_pending_l_idx = na
+var bool dby_pending_h = false, var int dby_pending_h_idx = na
+var bool dby_pending_l = false, var int dby_pending_l_idx = na
+
+// --- Session Detection (New York) ---
 is_pm = not na(time(timeframe.period, pm_session, "America/New_York"))
 is_yd = not na(time(timeframe.period, yd_session, "America/New_York"))
 
-// 1. Premarket & Shift Logic (Triggered at 4:00 AM)
+// --- Helper: resolve pending bodies using bar count ---
+f_resolve_pending(_pending, _stored_idx) =>
+    if _pending and not na(_stored_idx)
+        if bar_index - _stored_idx >= bars_per_mtf
+            // Exactly one MTF candle has passed → use the *current* MTF body (which is the body of the "next" candle)
+            [true]   // ready to assign
+        else
+            [false]  // still waiting
+    else
+        [false]
+
+// --- RESOLVE ALL PENDING UPDATES (every bar) ---
+// Current Day
+if c_pending_h
+    [ready_h] = f_resolve_pending(c_pending_h, c_pending_h_idx)
+    if ready_h
+        c_body_h := math.max(mtf_open, mtf_close)
+        c_pending_h := false
+if c_pending_l
+    [ready_l] = f_resolve_pending(c_pending_l, c_pending_l_idx)
+    if ready_l
+        c_body_l := math.min(mtf_open, mtf_close)
+        c_pending_l := false
+
+// Yesterday
+if y_pending_h
+    [ready_h] = f_resolve_pending(y_pending_h, y_pending_h_idx)
+    if ready_h
+        y_body_h := math.max(mtf_open, mtf_close)
+        y_pending_h := false
+if y_pending_l
+    [ready_l] = f_resolve_pending(y_pending_l, y_pending_l_idx)
+    if ready_l
+        y_body_l := math.min(mtf_open, mtf_close)
+        y_pending_l := false
+
+// DBY
+if dby_pending_h
+    [ready_h] = f_resolve_pending(dby_pending_h, dby_pending_h_idx)
+    if ready_h
+        dby_body_h := math.max(mtf_open, mtf_close)
+        dby_pending_h := false
+if dby_pending_l
+    [ready_l] = f_resolve_pending(dby_pending_l, dby_pending_l_idx)
+    if ready_l
+        dby_body_l := math.min(mtf_open, mtf_close)
+        dby_pending_l := false
+
+// --- Premarket & Shift ---
 if is_pm
     if not is_pm[1]
-        // SHIFT DATA AT 4:00 AM EST
+        // Force‑resolve any pending Current Day before shifting
+        if c_pending_h
+            c_body_h := math.max(mtf_open, mtf_close)
+            c_pending_h := false
+        if c_pending_l
+            c_body_l := math.min(mtf_open, mtf_close)
+            c_pending_l := false
+        
         dby_h := y_h, dby_h_idx := y_h_idx, dby_body_h := y_body_h
         dby_l := y_l, dby_l_idx := y_l_idx, dby_body_l := y_body_l
         
         y_h := c_h, y_h_idx := c_h_idx, y_body_h := c_body_h
         y_l := c_l, y_l_idx := c_l_idx, y_body_l := c_body_l
         
-        // Reset PM Trackers for the new morning
         pm_h := high, pm_h_idx := bar_index
         pm_l := low,  pm_l_idx := bar_index
     else
-        // Continue tracking PM High/Low
         if high >= pm_h
             pm_h := high, pm_h_idx := bar_index
         if low <= pm_l
             pm_l := low,  pm_l_idx := bar_index
 
-// 2. Regular Session Logic (Tracking Only)
+// --- Regular Session ---
 if is_yd
     if not is_yd[1]
-        // Reset current tracker for the fresh 9:30 AM session
-        c_h := high, c_h_idx := bar_index, c_body_h := math.max(mtf_open, mtf_close)
-        c_l := low,  c_l_idx := bar_index, c_body_l := math.min(mtf_open, mtf_close)
+        c_h := high
+        c_h_idx := bar_index
+        c_l := low
+        c_l_idx := bar_index
+        
+        if use_next_candle
+            c_pending_h := true
+            c_pending_h_idx := bar_index
+            c_pending_l := true
+            c_pending_l_idx := bar_index
+        else
+            c_body_h := math.max(mtf_open, mtf_close)
+            c_body_l := math.min(mtf_open, mtf_close)
     else
-        // Update current RTH High/Low
         if high >= c_h
-            c_h := high, c_h_idx := bar_index, c_body_h := math.max(mtf_open, mtf_close)
+            c_h := high
+            c_h_idx := bar_index
+            if use_next_candle
+                c_pending_h := true
+                c_pending_h_idx := bar_index
+            else
+                c_body_h := math.max(mtf_open, mtf_close)
         if low <= c_l
-            c_l := low,  c_l_idx := bar_index, c_body_l := math.min(mtf_open, mtf_close)
+            c_l := low
+            c_l_idx := bar_index
+            if use_next_candle
+                c_pending_l := true
+                c_pending_l_idx := bar_index
+            else
+                c_body_l := math.min(mtf_open, mtf_close)
 
-// --- Rendering ---
+// --- RENDERING (exactly as original) ---
 var line l_pmh = na,  var line l_pml = na
 var line l_ydh = na,  var line l_ydl = na
 var line l_dbyh = na, var line l_dbyl = na
@@ -75,7 +164,6 @@ var label lbl_pmh = na, var label lbl_pml = na
 var label lbl_ydh = na, var label lbl_ydl = na
 var label lbl_dbyh = na, var label lbl_dbyl = na
 
-// Cleanup
 line.delete(l_pmh), line.delete(l_pml)
 line.delete(l_ydh), line.delete(l_ydl)
 line.delete(l_dbyh), line.delete(l_dbyl)
@@ -92,7 +180,7 @@ label_x = bar_index + 5
 
 f_get_label(_txt, _val) => _txt + ": " + str.tostring(_val, format.mintick)
 
-// --- Rendering Blocks (No logic changes here, just drawing updated variables) ---
+// --- Draw DBY ---
 if show_dby and not na(dby_h)
     l_dbyh := line.new(dby_h_idx, dby_h, label_x, dby_h, color=dby_color, width=1)
     b_dbyh := box.new(dby_h_idx, dby_h, label_x, dby_body_h, bgcolor=c_dby_bg, border_color=c_none)
@@ -101,6 +189,7 @@ if show_dby and not na(dby_h)
     b_dbyl := box.new(dby_l_idx, dby_l, label_x, dby_body_l, bgcolor=c_dby_bg, border_color=c_none)
     lbl_dbyl := label.new(label_x, dby_l, f_get_label("DBPL", dby_l), color=c_none, textcolor=dby_color, style=label.style_label_left)
 
+// --- Draw Yesterday ---
 if show_yd and not na(y_h)
     l_ydh := line.new(y_h_idx, y_h, label_x, y_h, color=yd_color, width=1)
     b_ydh := box.new(y_h_idx, y_h, label_x, y_body_h, bgcolor=c_yd_bg, border_color=c_none)
@@ -109,8 +198,10 @@ if show_yd and not na(y_h)
     b_ydl := box.new(y_l_idx, y_l, label_x, y_body_l, bgcolor=c_yd_bg, border_color=c_none)
     lbl_ydl := label.new(label_x, y_l, f_get_label("PDL", y_l), color=c_none, textcolor=yd_color, style=label.style_label_left)
 
+// --- Draw Premarket ---
 if show_pm and not na(pm_h)
     l_pmh := line.new(pm_h_idx, pm_h, label_x, pm_h, color=pm_color, width=1, style=line.style_dotted)
     lbl_pmh := label.new(label_x, pm_h, f_get_label("PMH", pm_h), color=c_none, textcolor=pm_color, style=label.style_label_left)
     l_pml := line.new(pm_l_idx, pm_l, label_x, pm_l, color=pm_color, width=1, style=line.style_dotted)
     lbl_pml := label.new(label_x, pm_l, f_get_label("PML", pm_l), color=c_none, textcolor=pm_color, style=label.style_label_left)
+

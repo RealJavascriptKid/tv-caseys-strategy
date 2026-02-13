@@ -19,19 +19,12 @@ zone_transp = input.int(90, "Zone Transparency", minval=0, maxval=100)
 [mtf_high, mtf_low, mtf_open, mtf_close] = request.security(syminfo.tickerid, tf_input, [high, low, open, close], lookahead=barmerge.lookahead_on)
 
 // --- Storage Variables ---
-// Current Session Trackers
 var float c_h = na, var int c_h_idx = na, var float c_body_h = na
 var float c_l = na, var int c_l_idx = na, var float c_body_l = na
-
-// Yesterday (PDH/L) - Thursday if today is Friday
 var float y_h = na, var int y_h_idx = na, var float y_body_h = na
 var float y_l = na, var int y_l_idx = na, var float y_body_l = na
-
-// Day Before (DBPH/L) - Wednesday if today is Friday
 var float dby_h = na, var int dby_h_idx = na, var float dby_body_h = na
 var float dby_l = na, var int dby_l_idx = na, var float dby_body_l = na
-
-// Premarket
 var float pm_h = na, var int pm_h_idx = na
 var float pm_l = na, var int pm_l_idx = na
 
@@ -39,34 +32,34 @@ var float pm_l = na, var int pm_l_idx = na
 is_pm = not na(time(timeframe.period, pm_session, "America/New_York"))
 is_yd = not na(time(timeframe.period, yd_session, "America/New_York"))
 
-// 1. Premarket Logic
+// 1. Premarket & Shift Logic (Triggered at 4:00 AM)
 if is_pm
     if not is_pm[1]
+        // SHIFT DATA AT 4:00 AM EST
+        dby_h := y_h, dby_h_idx := y_h_idx, dby_body_h := y_body_h
+        dby_l := y_l, dby_l_idx := y_l_idx, dby_body_l := y_body_l
+        
+        y_h := c_h, y_h_idx := c_h_idx, y_body_h := c_body_h
+        y_l := c_l, y_l_idx := c_l_idx, y_body_l := c_body_l
+        
+        // Reset PM Trackers for the new morning
         pm_h := high, pm_h_idx := bar_index
         pm_l := low,  pm_l_idx := bar_index
     else
+        // Continue tracking PM High/Low
         if high >= pm_h
             pm_h := high, pm_h_idx := bar_index
         if low <= pm_l
             pm_l := low,  pm_l_idx := bar_index
 
-// 2. Main Session Logic & Shifting
+// 2. Regular Session Logic (Tracking Only)
 if is_yd
     if not is_yd[1]
-        // AT 09:30 AM (New Session Start):
-        // First: Move Yesterday's data to Day Before Yesterday (Wednesday becomes DBY)
-        dby_h := y_h, dby_h_idx := y_h_idx, dby_body_h := y_body_h
-        dby_l := y_l, dby_l_idx := y_l_idx, dby_body_l := y_body_l
-        
-        // Second: Move the just-finished session's data to Yesterday (Thursday becomes Yesterday)
-        y_h := c_h, y_h_idx := c_h_idx, y_body_h := c_body_h
-        y_l := c_l, y_l_idx := c_l_idx, y_body_l := c_body_l
-        
-        // Third: Reset Current Session for today (Friday)
+        // Reset current tracker for the fresh 9:30 AM session
         c_h := high, c_h_idx := bar_index, c_body_h := math.max(mtf_open, mtf_close)
         c_l := low,  c_l_idx := bar_index, c_body_l := math.min(mtf_open, mtf_close)
     else
-        // Update today's tracking
+        // Update current RTH High/Low
         if high >= c_h
             c_h := high, c_h_idx := bar_index, c_body_h := math.max(mtf_open, mtf_close)
         if low <= c_l
@@ -92,39 +85,32 @@ label.delete(lbl_pmh), label.delete(lbl_pml)
 label.delete(lbl_ydh), label.delete(lbl_ydl)
 label.delete(lbl_dbyh), label.delete(lbl_dbyl)
 
-// Colors
 c_none = color.new(color.white, 100)
 c_yd_bg = color.new(yd_color, zone_transp)
 c_dby_bg = color.new(dby_color, zone_transp)
 label_x = bar_index + 5
 
-// Function for formatting labels to keep code clean
 f_get_label(_txt, _val) => _txt + ": " + str.tostring(_val, format.mintick)
 
-// --- Draw DBY (Wednesday if Today is Friday) ---
+// --- Rendering Blocks (No logic changes here, just drawing updated variables) ---
 if show_dby and not na(dby_h)
     l_dbyh := line.new(dby_h_idx, dby_h, label_x, dby_h, color=dby_color, width=1)
     b_dbyh := box.new(dby_h_idx, dby_h, label_x, dby_body_h, bgcolor=c_dby_bg, border_color=c_none)
     lbl_dbyh := label.new(label_x, dby_h, f_get_label("DBPH", dby_h), color=c_none, textcolor=dby_color, style=label.style_label_left)
-    
     l_dbyl := line.new(dby_l_idx, dby_l, label_x, dby_l, color=dby_color, width=1)
     b_dbyl := box.new(dby_l_idx, dby_l, label_x, dby_body_l, bgcolor=c_dby_bg, border_color=c_none)
     lbl_dbyl := label.new(label_x, dby_l, f_get_label("DBPL", dby_l), color=c_none, textcolor=dby_color, style=label.style_label_left)
 
-// --- Draw Yesterday (Thursday if Today is Friday) ---
 if show_yd and not na(y_h)
     l_ydh := line.new(y_h_idx, y_h, label_x, y_h, color=yd_color, width=1)
     b_ydh := box.new(y_h_idx, y_h, label_x, y_body_h, bgcolor=c_yd_bg, border_color=c_none)
     lbl_ydh := label.new(label_x, y_h, f_get_label("PDH", y_h), color=c_none, textcolor=yd_color, style=label.style_label_left)
-    
     l_ydl := line.new(y_l_idx, y_l, label_x, y_l, color=yd_color, width=1)
     b_ydl := box.new(y_l_idx, y_l, label_x, y_body_l, bgcolor=c_yd_bg, border_color=c_none)
     lbl_ydl := label.new(label_x, y_l, f_get_label("PDL", y_l), color=c_none, textcolor=yd_color, style=label.style_label_left)
 
-// --- Draw Premarket ---
 if show_pm and not na(pm_h)
-    l_pmh := line.new(pm_h_idx, pm_h, label_x, pm_h, color=pm_color, width=1,style=line.style_dotted)
+    l_pmh := line.new(pm_h_idx, pm_h, label_x, pm_h, color=pm_color, width=1, style=line.style_dotted)
     lbl_pmh := label.new(label_x, pm_h, f_get_label("PMH", pm_h), color=c_none, textcolor=pm_color, style=label.style_label_left)
-    
-    l_pml := line.new(pm_l_idx, pm_l, label_x, pm_l, color=pm_color, width=1,style=line.style_dotted)
+    l_pml := line.new(pm_l_idx, pm_l, label_x, pm_l, color=pm_color, width=1, style=line.style_dotted)
     lbl_pml := label.new(label_x, pm_l, f_get_label("PML", pm_l), color=c_none, textcolor=pm_color, style=label.style_label_left)

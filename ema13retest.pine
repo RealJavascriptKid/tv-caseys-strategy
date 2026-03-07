@@ -1,0 +1,58 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © Saad_Pro
+//@version=5
+indicator("EMA 13 Retest Signals", overlay=true, max_labels_count=500)
+
+
+ema13 = ta.ema(close, 13)
+ema48 = ta.ema(close, 48)
+ema200 = ta.ema(close, 200)
+
+// --- Retest Logic Inputs ---
+group_retest        = "Retest Logic"
+weak_threshold      = input.float(0.3, "Weak Body Ratio (Body/Range)", minval=0.1, maxval=1.0, tooltip="Lower = more 'Doji-ish' (0.3 = 30% body)", group=group_retest)
+lookback_weak       = input.int(3, "Min. Weak Candles", minval=1, group=group_retest)
+ema_proximity_pct   = input.float(0.15, "EMA Proximity Threshold (%)", minval=0.01, step=0.01, tooltip="Allows signal if price is very close to EMA without strictly touching it", group=group_retest)
+strong_multiplier   = input.float(2.5, "Strong Candle Multiplier", minval=1.0, tooltip="Body must be 2.5x larger than 10-bar average", group=group_retest)
+
+// --- Session Filter ---
+// Starts at 09:45 (15 mins after open) and ends at 16:00
+ny_signal_session = "0945-1600"
+is_signal_window  = not na(time(timeframe.period, ny_signal_session, "America/New_York"))
+
+// --- Definitions ---
+body_size    = math.abs(close - open)
+candle_range = high - low
+is_weak      = candle_range > 0 ? (body_size / candle_range) <= weak_threshold : false
+avg_body     = ta.sma(body_size, 10)
+is_strong    = body_size > (avg_body * strong_multiplier)
+
+// --- Proximity Logic ---
+dist_to_ema = (math.abs(close - ema13) / ema13) * 100
+is_near_ema = dist_to_ema <= ema_proximity_pct or (low <= ema13 and high >= ema13)
+
+// --- Trend Confirmation Logic ---
+bear_trend_confirm = ema13 < ema48 and ema13 < ema200
+bull_trend_confirm = ema13 > ema48 and ema13 > ema200
+
+// --- Signal Calculation ---
+weak_count = 0
+for i = 1 to 5
+    if is_weak[i] and is_near_ema[i]
+        weak_count += 1
+
+// Bearish: Trend + Session + Pullback + Strong Breakdown
+bear_retest = is_signal_window and bear_trend_confirm and close[1] < ema13[1] and weak_count >= lookback_weak and is_strong and close < open and close < low[1]
+
+// Bullish: Trend + Session + Pullback + Strong Breakout
+bull_retest = is_signal_window and bull_trend_confirm and close[1] > ema13[1] and weak_count >= lookback_weak and is_strong and close > open and close > high[1]
+
+// --- Visual Plotting ---
+plotshape(bear_retest, "Bearish Retest", shape.triangledown, location.abovebar, color.new(#9c0202, 0), text="RETEST", textcolor=color.white, size=size.small)
+plotshape(bull_retest, "Bullish Retest", shape.triangleup, location.belowbar, color.new(#09b61d, 0), text="RETEST", textcolor=color.white, size=size.small)
+
+
+
+// --- Alert Conditions ---
+alertcondition(bull_retest, title="EMA 13 Bullish Retest", message="EMA 13 Bullish Retest Signal on {{ticker}}")
+alertcondition(bear_retest, title="EMA 13 Bearish Retest", message="EMA 13 Bearish Retest Signal on {{ticker}}")

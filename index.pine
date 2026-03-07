@@ -236,7 +236,7 @@ show_retest_signals = input.bool(false, "Show 13 EMA Retest Signals (beta)", gro
 weak_threshold      = input.float(0.3, "Weak Body Ratio (Body/Range)", minval=0.1, maxval=1.0, tooltip="Lower = more 'Doji-ish' (0.3 = 30% body)", group=group_retest)
 strong_multiplier   = input.float(2.5, "Strong Candle Multiplier", minval=1.0, tooltip="Body must be 2.5x larger than 10-bar average", group=group_retest)
 lookback_weak       = input.int(3, "Min. Weak Candles", minval=1, group=group_retest)
-ema_proximity_pct   = input.float(0.2, "EMA Proximity Threshold (%)", minval=0.01, step=0.01, tooltip="Allows signal if price is very close to EMA without strictly touching it", group=group_retest)
+ema_proximity_pct   = input.float(0.15, "EMA Proximity Threshold (%)", minval=0.01, step=0.01, tooltip="Allows signal if price is very close to EMA without strictly touching it", group=group_retest)
 
 // --- Definitions ---
 body_size    = math.abs(close - open)

@@ -1,11 +1,11 @@
 // © Saad_Pro
 //@version=5
-indicator("SVP: HVN vs LVN Zones by Saad_Pro", shorttitle="SVP-Zones", overlay=true, max_boxes_count=500, max_lines_count=500)
+indicator("HVN Zones by Saad_Pro", shorttitle="HVN-Zones", overlay=true, max_boxes_count=500, max_lines_count=500)
 
 // --- USER INPUTS ---
 session_input = input.session("0400-1600", "Trading Session")
 show_type     = input.string("HVN (Sticky)", "Zone Type", options=["HVN (Sticky)", "LVN (Fast)"], group="Logic")
-hvn_threshold = input.int(2, "Zone Sensitivity", minval=1, group="Logic")
+hvn_threshold = input.int(1, "Zone Sensitivity", minval=1, group="Logic")
 hvn_color     = input.color(color.new(color.orange, 80), "HVN Color", group="Colors")
 lvn_color     = input.color(color.new(color.blue, 80), "LVN Color (Fast Move)", group="Colors")
 

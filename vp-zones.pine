@@ -1,11 +1,11 @@
-// © Saad_Pro
 //@version=5
-indicator("HVN Zones by Saad_Pro", shorttitle="HVN-Zones", overlay=true, max_boxes_count=500, max_lines_count=500)
+indicator("HVN Zones by Saad_Pro", shorttitle="HVN-Zones", overlay=true, max_boxes_count=500)
 
 // --- USER INPUTS ---
 session_input = input.session("0400-1600", "Trading Session")
 show_type     = input.string("HVN (Sticky)", "Zone Type", options=["HVN (Sticky)", "LVN (Fast)"], group="Logic")
-hvn_threshold = input.int(1, "Zone Sensitivity", minval=1, group="Logic")
+hvn_threshold = input.int(3, "Neighbor Check (Bins)", minval=1, group="Logic", tooltip="How many bars left/right to check for a peak")
+rel_strength  = input.float(1.5, "Relative Spike Strength", minval=1.0, step=0.1, group="Logic", tooltip="How much taller must a bar be than its neighbors? (1.5 = 50% taller)")
 hvn_color     = input.color(color.new(color.orange, 80), "HVN Color", group="Colors")
 lvn_color     = input.color(color.new(color.blue, 80), "LVN Color (Fast Move)", group="Colors")
 
@@ -13,13 +13,12 @@ lvn_color     = input.color(color.new(color.blue, 80), "LVN Color (Fast Move)", 
 var float[] vol_bins   = array.new_float(0)
 var float[] price_bins = array.new_float(0)
 var box[] zone_boxes   = array.new_box(0)
-var int start_time     = na // Changed from start_bar to start_time
+var int start_time     = na 
 
 // --- SESSION LOGIC ---
 in_session = not na(time(timeframe.period, session_input))
 is_new_session = in_session and not in_session[1]
 
-// Reset everything when a new session starts
 if is_new_session
     if array.size(zone_boxes) > 0
         for b in zone_boxes
@@ -27,10 +26,9 @@ if is_new_session
     array.clear(zone_boxes)
     array.clear(vol_bins)
     array.clear(price_bins)
-    start_time := time // Store the exact timestamp of the session start
+    start_time := time
 
 // --- CALCULATE PROFILE ---
-// Fetch 1-minute data
 float[] lt_c = request.security_lower_tf(syminfo.tickerid, "1", close)
 float[] lt_v = request.security_lower_tf(syminfo.tickerid, "1", volume)
 
@@ -40,66 +38,59 @@ if in_session and not na(lt_c) and array.size(lt_c) > 0
         float c = array.get(lt_c, j)
         float v = nz(array.get(lt_v, j))
         bool found = false
-        
-        // Safety check
         if array.size(price_bins) > 0
             for i = 0 to array.size(price_bins) - 1
                 if c >= array.get(price_bins, i) and c < array.get(price_bins, i) + step
                     array.set(vol_bins, i, array.get(vol_bins, i) + v)
                     found := true
                     break
-        
         if not found
             array.push(price_bins, math.floor(c / step) * step)
             array.push(vol_bins, v)
 
 // --- DRAWING ZONES ---
 if barstate.islast and array.size(vol_bins) > (hvn_threshold * 2)
-    // Clear old boxes
     if array.size(zone_boxes) > 0
         for b in zone_boxes
             box.delete(b)
         array.clear(zone_boxes)
     
-    // Sort Data by price
     int[] idxs = array.sort_indices(price_bins)
     float[] s_p = array.new_float(0)
     float[] s_v = array.new_float(0)
-    
     for i = 0 to array.size(idxs) - 1
         int id = array.get(idxs, i)
         array.push(s_p, array.get(price_bins, id))
         array.push(s_v, array.get(vol_bins, id))
         
-    float max_v = array.max(s_v)
     float step = syminfo.mintick * 20
-    
-    // Calculate precise time coordinates (bypasses max_bars_back limit entirely)
     int ms_per_bar = timeframe.in_seconds(timeframe.period) * 1000
     int left_t = na(start_time) ? time - (ms_per_bar * 50) : start_time
-    int right_t = time + (ms_per_bar * 20) // Project 20 bars into the future
+    int right_t = time + (ms_per_bar * 40)
 
-    // Detect Peaks (HVN) or Valleys (LVN)
     for i = hvn_threshold to array.size(s_p) - 1 - hvn_threshold
         float cur_v = array.get(s_v, i)
-        bool is_peak = true
-        bool is_valley = true
         
-        // Compare current bin to its neighbors
+        float sum_neighbor_v = 0.0
+        bool is_local_peak = true
+        bool is_local_valley = true
+        
         for j = 1 to hvn_threshold
-            if cur_v <= array.get(s_v, i - j) or cur_v <= array.get(s_v, i + j)
-                is_peak := false
-            if cur_v >= array.get(s_v, i - j) or cur_v >= array.get(s_v, i + j)
-                is_valley := false
+            float v_prev = array.get(s_v, i - j)
+            float v_next = array.get(s_v, i + j)
+            sum_neighbor_v += v_prev + v_next
+            if cur_v <= v_prev or cur_v <= v_next
+                is_local_peak := false
+            if cur_v >= v_prev or cur_v >= v_next
+                is_local_valley := false
+        
+        float avg_neighbor_v = sum_neighbor_v / (hvn_threshold * 2)
 
-        // Logic to draw HVN vs LVN
-        bool draw_hvn = (show_type == "HVN (Sticky)" and is_peak and cur_v > max_v * 0.5)
-        bool draw_lvn = (show_type == "LVN (Fast)" and is_valley and cur_v < max_v * 0.15)
+        bool draw_hvn = (show_type == "HVN (Sticky)" and is_local_peak and cur_v > (avg_neighbor_v * rel_strength))
+        bool draw_lvn = (show_type == "LVN (Fast)" and is_local_valley and cur_v < (avg_neighbor_v / rel_strength))
 
         if draw_hvn or draw_lvn
             color z_col = draw_hvn ? hvn_color : lvn_color
-            float top = array.get(s_p, i) + step
-            float bot = array.get(s_p, i)
-            
-            // Draw using xloc.bar_time
+            float top = array.get(s_p, i) + (step * 1.5) 
+            float bot = array.get(s_p, i) - (step * 0.5)
             array.push(zone_boxes, box.new(left_t, top, right_t, bot, bgcolor=z_col, border_color=na, xloc=xloc.bar_time))

@@ -4,7 +4,7 @@ indicator("HVN Zones by Saad_Pro", shorttitle="HVN-Zones", overlay=true, max_box
 // --- USER INPUTS ---
 session_input = input.session("0400-1600", "Trading Session")
 show_type     = input.string("HVN (Sticky)", "Zone Type", options=["HVN (Sticky)", "LVN (Fast)"], group="Logic")
-hvn_threshold = input.int(3, "Neighbor Check (Bins)", minval=1, group="Logic", tooltip="How many bars left/right to check for a peak")
+hvn_threshold = input.int(1, "Neighbor Check (Bins)", minval=1, group="Logic", tooltip="How many bars left/right to check for a peak")
 rel_strength  = input.float(1.5, "Relative Spike Strength", minval=1.0, step=0.1, group="Logic", tooltip="How much taller must a bar be than its neighbors? (1.5 = 50% taller)")
 hvn_color     = input.color(color.new(color.orange, 80), "HVN Color", group="Colors")
 lvn_color     = input.color(color.new(color.blue, 80), "LVN Color (Fast Move)", group="Colors")

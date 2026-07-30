@@ -1,0 +1,49 @@
+//@version=5
+indicator("Clean Smooth Channel Trend Detector", overlay=true)
+
+// --- Inputs ---
+emaSource    = input.source(close, title="Source")
+channelLen   = input.int(9, title="Channel Baseline EMA Length")
+channelWidth = input.float(0.1, title="Channel Width (% of Price)") / 100.0
+trendEmaLen  = input.int(13, title="Trend Filter EMA Length")
+xBars        = input.int(5, title="X Bars (No Touch Required)")
+trendDir     = input.string("Both", title="Trend Direction Filter", options=["Both", "Downtrend", "Uptrend"])
+
+// --- Calculations ---
+baseEma  = ta.ema(emaSource, channelLen)
+trendEma = ta.ema(emaSource, trendEmaLen)
+
+// Fixed-width channel edges (smooth, parallel, non-expanding)
+offset   = baseEma * channelWidth
+upper    = baseEma + offset
+lower    = baseEma - offset
+
+// Check conditions for the last X bars
+bool isDowntrend = true
+bool isUptrend   = true
+
+for i = 0 to xBars - 1
+    // Downtrend: Price must be strictly under the baseline EMA AND inside the channel boundaries
+    if high[i] >= baseEma[i] or low[i] < lower[i] or high[i] > upper[i]
+        isDowntrend := false
+    
+    // Uptrend: Price must be strictly above the baseline EMA AND inside the channel boundaries
+    if low[i] <= baseEma[i] or low[i] < lower[i] or high[i] > upper[i]
+        isUptrend := false
+
+// Apply direction filter selection
+bool validDown = (trendDir == "Both" or trendDir == "Downtrend") and isDowntrend
+bool validUp   = (trendDir == "Both" or trendDir == "Uptrend") and isUptrend
+
+// --- Plotting ---
+p1 = plot(upper, title="Upper Channel", color=color.orange, linewidth=1)
+p2 = plot(lower, title="Lower Channel", color=color.orange, linewidth=1)
+plot(baseEma, title="Baseline EMA", color=color.new(color.orange, 50), linewidth=1)
+plot(trendEma, title="Trend Filter EMA", color=color.yellow, linewidth=2)
+
+fill(p1, p2, color=color.new(color.orange, 92), title="Channel Fill")
+
+// Signal markers (Blue circles appearing once when the condition is met)
+plotshape(validDown and not validDown[1], title="Downtrend Signal", style=shape.triangledown, location=location.abovebar, color=#d0475e, size=size.small)
+plotshape(validUp and not validUp[1], title="Uptrend Signal", style=shape.triangleup, location=location.belowbar, color=#298d31, size=size.small)
+

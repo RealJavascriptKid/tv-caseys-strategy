@@ -1,0 +1,182 @@
+//@version=5
+indicator("Multi-Level Curve Retest Signals (PMH, PML, PDH, PDL, ORB)", overlay=true, max_labels_count=500)
+
+// ==================== INPUTS: LEVELS ====================
+groupLevels = "Level Selection"
+usePMH = input.bool(true, "Premarket High (PMH)", group=groupLevels)
+usePML = input.bool(true, "Premarket Low (PML)", group=groupLevels)
+usePDH = input.bool(true, "Previous Day High (PDH)", group=groupLevels)
+usePDL = input.bool(true, "Previous Day Low (PDL)", group=groupLevels)
+useORBH = input.bool(true, "5-Min Opening Range High (ORB H)", group=groupLevels)
+useORBL = input.bool(true, "5-Min Opening Range Low (ORB L)", group=groupLevels)
+
+// ==================== INPUTS: PREMARKET TIME ====================
+groupPM = "Premarket Session Settings"
+pmStartHour = input.int(4, "Premarket Start Hour", group=groupPM)
+pmStartMinute = input.int(1, "Premarket Start Minute", group=groupPM)
+pmEndHour = input.int(9, "Premarket End Hour", group=groupPM)
+pmEndMinute = input.int(30, "Premarket End Minute", group=groupPM)
+
+// ==================== INPUTS: TRADE ENTRY TIME WINDOW ====================
+groupTime = "Trade Entry Time Window"
+startHour = input.int(9, "Start Hour", group=groupTime)
+startMinute = input.int(31, "Start Minute", group=groupTime)
+endHour = input.int(11, "End Hour", group=groupTime)
+endMinute = input.int(0, "End Minute", group=groupTime)
+
+// ==================== INPUTS: CURVE LOGIC & RISK ====================
+groupLogic = "Curve & Risk Settings"
+minDistanceATR = input.float(1.5, "Min Distance Away (ATR)", minval=0.5, group=groupLogic)
+tolerancePct = input.float(0.05, "Retest Tolerance (%)", minval=0.0, group=groupLogic)
+maxBarsWindow = input.int(25, "Max Bars for Retest Window", minval=5, group=groupLogic)
+atrLen = input.int(14, "ATR Length", group=groupLogic)
+
+// ==================== LEVEL CALCULATIONS ====================
+bool newDay = ta.change(time("D")) != 0
+
+// Previous Day Levels (Daily timeframe offset by 1)
+[d_high, d_low] = request.security(syminfo.tickerid, "D", [high[1], low[1]], barmerge.gaps_off, barmerge.lookahead_off)
+
+// Premarket High and Low Calculation
+var float pmHigh = na
+var float pmLow = na
+var bool pmActive = false
+
+bool isPremarketTime = (hour > pmStartHour or (hour == pmStartHour and minute >= pmStartMinute)) and (hour < pmEndHour or (hour == pmEndHour and minute <= pmEndMinute))
+
+if newDay
+    pmHigh := na
+    pmLow := na
+    pmActive := false
+
+if isPremarketTime
+    if not pmActive
+        pmHigh := high
+        pmLow := low
+        pmActive := true
+    else
+        pmHigh := math.max(pmHigh, high)
+        pmLow := math.min(pmLow, low)
+
+// 5-Min Opening Range (ORB) Calculation
+var float orbHigh = na
+var float orbLow = na
+var bool orbStarted = false
+
+if newDay
+    orbHigh := na
+    orbLow := na
+    orbStarted := false
+
+bool isFirst5Min = (hour == 9 and minute >= 30 and minute < 35)
+if isFirst5Min
+    if not orbStarted
+        orbHigh := high
+        orbLow := low
+        orbStarted := true
+    else
+        orbHigh := math.max(orbHigh, high)
+        orbLow := math.min(orbLow, low)
+
+// Plots for Visualizing Active Reference Levels
+plot(usePMH ? pmHigh : na, title="PMH", color=color.purple, linewidth=2, style=plot.style_line)
+plot(usePML ? pmLow : na, title="PML", color=color.purple, linewidth=2, style=plot.style_line)
+plot(usePDH ? d_high : na, title="PDH", color=color.green, linewidth=2, style=plot.style_line)
+plot(usePDL ? d_low : na, title="PDL", color=color.red, linewidth=2, style=plot.style_line)
+plot(useORBH ? orbHigh : na, title="ORB High", color=color.blue, linewidth=2, style=plot.style_line)
+plot(useORBL ? orbLow : na, title="ORB Low", color=color.orange, linewidth=2, style=plot.style_line)
+
+// Indicator calculations
+atr = ta.atr(atrLen)
+
+// Time Window Verification
+bool inTimeWindow = (hour > startHour or (hour == startHour and minute >= startMinute)) and (hour < endHour or (hour == endHour and minute <= endMinute))
+
+// ==================== LONG SIGNAL SETUP (PMH, PDH, ORB H) ====================
+bool crossPMH = usePMH and not na(pmHigh) and ta.crossover(close, pmHigh)
+bool crossPDH = usePDH and ta.crossover(close, d_high)
+bool crossORBH = useORBH and not na(orbHigh) and ta.crossover(close, orbHigh)
+
+bool anyLongBreakout = crossPMH or crossPDH or crossORBH
+
+var int stateLong = 0 
+var float targetLongLevel = na
+var float maxPriceSinceBreakLong = na
+var int barsSinceBreakLong = 0
+
+bool longSignal = false
+
+if anyLongBreakout and inTimeWindow
+    stateLong := 1
+    maxPriceSinceBreakLong := high
+    barsSinceBreakLong := 0
+    if crossPMH
+        targetLongLevel := pmHigh
+    else if crossPDH
+        targetLongLevel := d_high
+    else if crossORBH
+        targetLongLevel := orbHigh
+
+if stateLong == 1 and not na(targetLongLevel)
+    barsSinceBreakLong += 1
+    maxPriceSinceBreakLong := math.max(maxPriceSinceBreakLong, high)
+    
+    bool movedAwayLong = (maxPriceSinceBreakLong - targetLongLevel) >= (minDistanceATR * atr)
+    bool isPullbackLong = low <= (targetLongLevel + (targetLongLevel * tolerancePct / 100)) and close >= targetLongLevel
+    
+    if inTimeWindow and movedAwayLong and isPullbackLong and barsSinceBreakLong >= 3
+        longSignal := true
+        stateLong := 0
+        targetLongLevel := na
+        
+    if barsSinceBreakLong > maxBarsWindow or close < targetLongLevel - (2 * atr) or not inTimeWindow
+        stateLong := 0
+        targetLongLevel := na
+
+// ==================== SHORT SIGNAL SETUP (PML, PDL, ORB L) ====================
+bool crossPML = usePML and not na(pmLow) and ta.crossunder(close, pmLow)
+bool crossPDL = usePDL and ta.crossunder(close, d_low)
+bool crossORBL = useORBL and not na(orbLow) and ta.crossunder(close, orbLow)
+
+bool anyShortBreakout = crossPML or crossPDL or crossORBL
+
+var int stateShort = 0 
+var float targetShortLevel = na
+var float minPriceSinceBreakShort = na
+var int barsSinceBreakShort = 0
+
+bool shortSignal = false
+
+if anyShortBreakout and inTimeWindow
+    stateShort := 1
+    minPriceSinceBreakShort := low
+    barsSinceBreakShort := 0
+    if crossPML
+        targetShortLevel := pmLow
+    else if crossPDL
+        targetShortLevel := d_low
+    else if crossORBL
+        targetShortLevel := orbLow
+
+if stateShort == 1 and not na(targetShortLevel)
+    barsSinceBreakShort += 1
+    minPriceSinceBreakShort := math.min(minPriceSinceBreakShort, low)
+    
+    bool movedAwayShort = (targetShortLevel - minPriceSinceBreakShort) >= (minDistanceATR * atr)
+    bool isPullbackShort = high >= (targetShortLevel - (targetShortLevel * tolerancePct / 100)) and close <= targetShortLevel
+    
+    if inTimeWindow and movedAwayShort and isPullbackShort and barsSinceBreakShort >= 3
+        shortSignal := true
+        stateShort := 0
+        targetShortLevel := na
+        
+    if barsSinceBreakShort > maxBarsWindow or close > targetShortLevel + (2 * atr) or not inTimeWindow
+        stateShort := 0
+        targetShortLevel := na
+
+// ==================== PLOTTING SIGNALS & ALERTS ====================
+plotshape(longSignal, title="Buy Signal", style=shape.triangleup, location=location.belowbar, color=color.green, size=size.small, text="BUY")
+plotshape(shortSignal, title="Sell Signal", style=shape.triangledown, location=location.abovebar, color=color.red, size=size.small, text="SELL")
+
+alertcondition(longSignal, title="Curve Retest Buy Alert", message="Curve Retest Buy Signal Triggered!")
+alertcondition(shortSignal, title="Curve Retest Sell Alert", message="Curve Retest Sell Signal Triggered!")

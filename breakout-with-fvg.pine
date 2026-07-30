@@ -1,0 +1,88 @@
+//@version=5
+indicator("FVG + Engulfing Strategy (Part 1)", overlay=true, max_lines_count=500, max_boxes_count=500)
+
+//=====================================================
+// USER INPUTS
+//=====================================================
+
+keepDays   = input.int(5, "Keep Levels for Last X Days", minval=1, maxval=30)
+showLevels = input.bool(true, "Show Historical Levels")
+
+//=====================================================
+// ARRAYS
+//=====================================================
+
+var line[] hiLines = array.new_line()
+var line[] loLines = array.new_line()
+var int[] lineDays = array.new_int()
+
+//=====================================================
+// NEW DAY DETECTION
+//=====================================================
+
+bool newDay = ta.change(time("D")) != 0
+
+//=====================================================
+// FUNCTION : Delete Old Levels
+//=====================================================
+
+f_cleanup() =>
+    while array.size(lineDays) > keepDays
+        line.delete(array.shift(hiLines))
+        line.delete(array.shift(loLines))
+        array.shift(lineDays)
+
+//=====================================================
+// DEMO LEVELS
+//=====================================================
+
+if newDay
+
+    float hi = high
+    float lo = low
+
+    line l1 = line.new(
+         bar_index,
+         hi,
+         bar_index,
+         hi,
+         extend=extend.none,
+         color=color.lime,
+         width=2)
+
+    line l2 = line.new(
+         bar_index,
+         lo,
+         bar_index,
+         lo,
+         extend=extend.none,
+         color=color.red,
+         width=2)
+
+    array.push(hiLines, l1)
+    array.push(loLines, l2)
+    array.push(lineDays, dayofmonth)
+
+//=====================================================
+// EXTEND TODAY'S LINES
+//=====================================================
+
+if array.size(hiLines) > 0
+
+    line.set_x2(array.get(hiLines, array.size(hiLines) - 1), bar_index)
+    line.set_x2(array.get(loLines, array.size(loLines) - 1), bar_index)
+
+//=====================================================
+// CLEANUP
+//=====================================================
+
+f_cleanup()
+
+//=====================================================
+// SHOW / HIDE
+//=====================================================
+
+if not showLevels
+    for i = 0 to array.size(hiLines) - 1
+        line.set_color(array.get(hiLines, i), color.new(color.lime, 100))
+        line.set_color(array.get(loLines, i), color.new(color.red, 100))

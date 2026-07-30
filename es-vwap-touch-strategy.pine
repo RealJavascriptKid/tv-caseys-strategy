@@ -1,0 +1,33 @@
+//@version=5
+strategy("VWAP Tap Strategy [Fixed]", overlay=true, initial_capital=10000, default_qty_type=strategy.percent_of_equity, default_qty_value=10, calc_on_every_tick=true)
+
+// Inputs for Take Profit and Stop Loss in ticks
+tpTicks = input.int(11, title="Take Profit (Ticks)")
+slTicks = input.int(10, title="Stop Loss (Ticks)")
+
+// Calculate standard Session VWAP
+vwapValue = ta.vwap(hlc3)
+
+// Corrected Tap Logic with proper historical indexing
+// Tap from above: Previous bar's low was above VWAP, current bar's low dips down to touch/cross it
+tapFromAbove = (low <= vwapValue) and (low[1] > vwapValue[1])
+
+// Tap from below: Previous bar's high was below VWAP, current bar's high rises up to touch/cross it
+tapFromBelow = (high >= vwapValue) and (high[1] < vwapValue[1])
+
+// Strategy Execution
+if strategy.position_size == 0
+    if tapFromAbove
+        strategy.entry("VWAP Buy", strategy.long)
+        strategy.exit("Exit Buy", "VWAP Buy", profit=tpTicks, loss=slTicks)
+        
+    if tapFromBelow
+        strategy.entry("VWAP Sell", strategy.short)
+        strategy.exit("Exit Sell", "VWAP Sell", profit=tpTicks, loss=slTicks)
+
+// Visual debugging shapes (shows arrows on the chart when a tap occurs)
+plotshape(tapFromAbove, title="Tap Above Signal", style=shape.triangleup, location=location.belowbar, color=color.green, size=size.small)
+plotshape(tapFromBelow, title="Tap Below Signal", style=shape.triangledown, location=location.abovebar, color=color.red, size=size.small)
+
+// Plot VWAP on the chart
+plot(vwapValue, title="VWAP", color=color.blue, linewidth=2)

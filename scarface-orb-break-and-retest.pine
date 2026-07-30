@@ -1,0 +1,61 @@
+//@version=5
+indicator("Scarface 1m Break & Retest (Strict Retest Only)", overlay=true, max_labels_count=50)
+
+// --- Settings ---
+tSession = "0930-1030:1234567"
+isSession = not na(time(timeframe.period, tSession))
+inFirst5Min = not na(time(timeframe.period, "0930-0935"))
+
+// --- 5m ORB Calculation ---
+var float orbHigh = na
+var float orbLow = na
+var bool isFirstBar = true
+
+if inFirst5Min
+    if isFirstBar
+        orbHigh := high
+        orbLow := low
+        isFirstBar := false
+    else
+        orbHigh := math.max(high, orbHigh)
+        orbLow := math.min(low, orbLow)
+else if not isSession
+    orbHigh := na
+    orbLow := na
+    isFirstBar := true
+
+// --- State Machine ---
+var bool hasBrokenAbove = false
+var bool hasBrokenBelow = false
+
+// Step 1: Detect the Breakout (Must close outside first)
+if isSession
+    if close > orbHigh and close[1] <= orbHigh
+        hasBrokenAbove := true
+    if close < orbLow and close[1] >= orbLow
+        hasBrokenBelow := true
+
+// Reset daily
+if not isSession
+    hasBrokenAbove := false
+    hasBrokenBelow := false
+
+// --- Retest Detection ---
+// Proximity: How close to the line the wick must be to count as a retest
+proximity = syminfo.mintick * 10 
+
+// "Weak Wick" Logic: The candle must touch the level but reject it
+// For Buy Retest: Low must be near ORB, but close must be higher (rejection)
+isBullishRejection = (low <= orbHigh + proximity) and (low >= orbHigh - proximity) and (close > low)
+isBearishRejection = (high >= orbLow - proximity) and (high <= orbLow + proximity) and (close < high)
+
+// Final Signal: Only trigger if breakout happened PREVIOUSLY, and now we have a rejection
+isBuySignal = hasBrokenAbove and isBullishRejection
+isSellSignal = hasBrokenBelow and isBearishRejection
+
+// --- Visualization ---
+plot(isSession ? orbHigh : na, color=color.orange, style=plot.style_linebr, linewidth=2, title="ORB High")
+plot(isSession ? orbLow : na, color=color.orange, style=plot.style_linebr, linewidth=2, title="ORB Low")
+
+plotshape(isBuySignal, title="BUY", style=shape.labelup, location=location.belowbar, color=color.green, text="BUY", textcolor=color.white, size=size.small)
+plotshape(isSellSignal, title="SELL", style=shape.labeldown, location=location.abovebar, color=color.red, text="SELL", textcolor=color.white, size=size.small)

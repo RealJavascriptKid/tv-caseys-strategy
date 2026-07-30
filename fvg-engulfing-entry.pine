@@ -1,0 +1,344 @@
+// =============================================================================
+// FVG + Engulfing Entry Strategy w/ Dynamic Key Levels
+// -----------------------------------------------------------------------------
+// - Key levels (ORB / PDH-PDL / PMH-PML) are drawn with line.new()/label.new()
+//   (NOT plot()) so each day's levels are locked in place and remain visible
+//   on the chart historically instead of repainting or being erased.
+// - Intended for use on an intraday chart (1-min recommended) for signals.
+//   Level *values* are timeframe-independent (session/day based).
+// =============================================================================
+//@version=5
+strategy("FVG + Engulfing Entry (Dynamic Key Levels)", overlay=true,
+     initial_capital=10000, default_qty_type=strategy.percent_of_equity,
+     default_qty_value=10, calc_on_every_tick=true, max_lines_count=500,
+     max_labels_count=500, max_boxes_count=500)
+
+// ============================= INPUTS =======================================
+grpLevels = "Key Levels"
+primaryLevelType = input.string("PDH/PDL", "Primary Key Level (drives signals)",
+     options=["ORB 5-min High/Low", "PDH/PDL", "PMH/PML"], group=grpLevels)
+showAllLevels    = input.bool(true, "Draw ALL level types (not just primary)", group=grpLevels)
+maxHistoryDays   = input.int(10, "Keep Levels for Last X Days", minval=1, maxval=200, group=grpLevels)
+showHistoricalLevels = input.bool(true, "Show Historical Level Lines/Labels", group=grpLevels)
+
+grpSession = "Session Times"
+tz          = input.string("America/New_York", "Timezone", group=grpSession)
+rthSession  = input.session("0930-1600", "Regular Session Hours (RTH)", group=grpSession)
+pmSession   = input.session("0400-0930", "Premarket Session Hours", group=grpSession)
+orbSession  = input.session("0930-0935", "ORB Time Window", group=grpSession)
+
+grpFVG = "FVG / Signal Settings"
+showFVGBoxes  = input.bool(true, "Show FVG Background Boxes", group=grpFVG)
+fvgMaxBoxes   = input.int(30, "Max FVG Boxes Kept on Chart", minval=5, group=grpFVG)
+fvgMaxBars    = input.int(60, "Invalidate FVG if no retest within X bars", minval=5, group=grpFVG)
+
+grpRisk = "Risk Management"
+rrRatio   = input.float(3.0, "Reward:Risk Ratio (1 : X)", minval=0.5, step=0.5, group=grpRisk)
+slExtBars = input.int(25, "SL/TP Line Length (bars forward)", minval=5, group=grpRisk)
+
+grpVis = "Visuals"
+bullColor = input.color(color.new(color.lime, 0), "Bullish Signal Color", group=grpVis)
+bearColor = input.color(color.new(color.red, 0), "Bearish Signal Color", group=grpVis)
+pdColor   = input.color(color.new(color.blue, 0), "PDH/PDL Line Color", group=grpVis)
+pmColor   = input.color(color.new(color.orange, 0), "PMH/PML Line Color", group=grpVis)
+orbColor  = input.color(color.new(color.purple, 0), "ORB Line Color", group=grpVis)
+
+grpStrat = "Strategy / Alerts"
+useStrategyOrders = input.bool(true, "Place Strategy Orders (backtest)", group=grpStrat)
+
+// ============================= HELPER FUNCTIONS =============================
+f_inSession(sess) =>
+    not na(time(timeframe.period, sess, tz))
+
+f_justActivated(act) =>
+    prevAct = na(act[1]) ? false : act[1]
+    act and not prevAct
+
+// Creates/updates a persistent, historically-retained horizontal level line
+f_levelLine(arr, curLine, value, active, justActivated, maxDays, col) =>
+    line lOut = curLine
+    if active and not na(value)
+        if justActivated or na(lOut)
+            lOut := line.new(bar_index, value, bar_index, value, color=col, width=2, style=line.style_solid)
+            array.push(arr, lOut)
+            if array.size(arr) > maxDays
+                oldl = array.shift(arr)
+                line.delete(oldl)
+        else
+            line.set_xy1(lOut, line.get_x1(lOut), value)
+            line.set_xy2(lOut, bar_index, value)
+    lOut
+
+// Creates/updates the matching text label for a level line
+f_levelLabel(arr, curLabel, value, active, justActivated, maxDays, col, txt) =>
+    label labOut = curLabel
+    if active and not na(value)
+        if justActivated or na(labOut)
+            labOut := label.new(bar_index, value, txt, style=label.style_label_left,
+                 color=color.new(col, 80), textcolor=col, size=size.small)
+            array.push(arr, labOut)
+            if array.size(arr) > maxDays
+                oldlab = array.shift(arr)
+                label.delete(oldlab)
+        else
+            label.set_xy(labOut, bar_index, value)
+    labOut
+
+// ============================= DAY / SESSION STATE ===========================
+newDay = ta.change(time("D", tz)) != 0
+inRTH  = f_inSession(rthSession)
+inPM   = f_inSession(pmSession)
+inORB  = f_inSession(orbSession)
+
+// ---- Previous Day High / Low (secure, non-repainting via lookahead_off) ----
+[pdHigh, pdLow] = request.security(syminfo.tickerid, "D", [high[1], low[1]], lookahead=barmerge.lookahead_off)
+
+// ---- Premarket High / Low (accumulated during premarket window) ----
+var float pmHigh = na
+var float pmLow  = na
+if newDay
+    pmHigh := na
+    pmLow  := na
+if inPM
+    pmHigh := na(pmHigh) ? high : math.max(pmHigh, high)
+    pmLow  := na(pmLow)  ? low  : math.min(pmLow, low)
+
+// ---- Opening Range (ORB) High / Low ----
+var float orbHigh = na
+var float orbLow  = na
+if newDay
+    orbHigh := na
+    orbLow  := na
+if inORB
+    orbHigh := na(orbHigh) ? high : math.max(orbHigh, high)
+    orbLow  := na(orbLow)  ? low  : math.min(orbLow, low)
+
+// ============================= LEVEL DRAWING (HISTORICAL) ====================
+showPD  = showAllLevels or primaryLevelType == "PDH/PDL"
+showPM  = showAllLevels or primaryLevelType == "PMH/PML"
+showORB = showAllLevels or primaryLevelType == "ORB 5-min High/Low"
+
+pdActive  = showHistoricalLevels and showPD  and (inPM or inRTH) and not na(pdHigh)
+pmActive  = showHistoricalLevels and showPM  and (inPM or inRTH) and not na(pmHigh)
+orbActive = showHistoricalLevels and showORB and inRTH           and not na(orbHigh)
+
+pdJustActivated  = f_justActivated(pdActive)
+pmJustActivated  = f_justActivated(pmActive)
+orbJustActivated = f_justActivated(orbActive)
+
+var array<line>  pdhLines  = array.new<line>(0)
+var array<line>  pdlLines  = array.new<line>(0)
+var array<line>  pmhLines  = array.new<line>(0)
+var array<line>  pmlLines  = array.new<line>(0)
+var array<line>  orbhLines = array.new<line>(0)
+var array<line>  orblLines = array.new<line>(0)
+
+var array<label> pdhLabels  = array.new<label>(0)
+var array<label> pdlLabels  = array.new<label>(0)
+var array<label> pmhLabels  = array.new<label>(0)
+var array<label> pmlLabels  = array.new<label>(0)
+var array<label> orbhLabels = array.new<label>(0)
+var array<label> orblLabels = array.new<label>(0)
+
+var line curPDHLine = na
+var line curPDLLine = na
+var line curPMHLine = na
+var line curPMLLine = na
+var line curORBHLine = na
+var line curORBLLine = na
+
+var label curPDHLabel = na
+var label curPDLLabel = na
+var label curPMHLabel = na
+var label curPMLLabel = na
+var label curORBHLabel = na
+var label curORBLLabel = na
+
+curPDHLine := f_levelLine(pdhLines, curPDHLine, pdHigh, pdActive, pdJustActivated, maxHistoryDays, pdColor)
+curPDLLine := f_levelLine(pdlLines, curPDLLine, pdLow,  pdActive, pdJustActivated, maxHistoryDays, pdColor)
+curPMHLine := f_levelLine(pmhLines, curPMHLine, pmHigh, pmActive, pmJustActivated, maxHistoryDays, pmColor)
+curPMLLine := f_levelLine(pmlLines, curPMLLine, pmLow,  pmActive, pmJustActivated, maxHistoryDays, pmColor)
+curORBHLine := f_levelLine(orbhLines, curORBHLine, orbHigh, orbActive, orbJustActivated, maxHistoryDays, orbColor)
+curORBLLine := f_levelLine(orblLines, curORBLLine, orbLow,  orbActive, orbJustActivated, maxHistoryDays, orbColor)
+
+if showHistoricalLevels
+    curPDHLabel := f_levelLabel(pdhLabels, curPDHLabel, pdHigh, pdActive, pdJustActivated, maxHistoryDays, pdColor, "PDH")
+    curPDLLabel := f_levelLabel(pdlLabels, curPDLLabel, pdLow,  pdActive, pdJustActivated, maxHistoryDays, pdColor, "PDL")
+    curPMHLabel := f_levelLabel(pmhLabels, curPMHLabel, pmHigh, pmActive, pmJustActivated, maxHistoryDays, pmColor, "PMH")
+    curPMLLabel := f_levelLabel(pmlLabels, curPMLLabel, pmLow,  pmActive, pmJustActivated, maxHistoryDays, pmColor, "PML")
+    curORBHLabel := f_levelLabel(orbhLabels, curORBHLabel, orbHigh, orbActive, orbJustActivated, maxHistoryDays, orbColor, "ORBH")
+    curORBLLabel := f_levelLabel(orblLabels, curORBLLabel, orbLow,  orbActive, orbJustActivated, maxHistoryDays, orbColor, "ORBL")
+
+// ============================= PRIMARY LEVEL SELECTION ========================
+primaryHigh = primaryLevelType == "ORB 5-min High/Low" ? orbHigh : primaryLevelType == "PDH/PDL" ? pdHigh : pmHigh
+primaryLow  = primaryLevelType == "ORB 5-min High/Low" ? orbLow  : primaryLevelType == "PDH/PDL" ? pdLow  : pmLow
+
+// ============================= BREAKOUT STATE ================================
+var bool breakoutUpActive   = false
+var bool breakoutDownActive = false
+
+brokeAbove = not na(primaryHigh) and ta.crossover(close, primaryHigh)
+brokeBelow = not na(primaryLow)  and ta.crossunder(close, primaryLow)
+
+if brokeAbove
+    breakoutUpActive   := true
+    breakoutDownActive := false
+if brokeBelow
+    breakoutDownActive := true
+    breakoutUpActive    := false
+
+// ============================= FVG DETECTION ==================================
+bullFVGRaw = high[2] < low     // candle1 high < candle3 low
+bearFVGRaw = low[2]  > high    // candle1 low  > candle3 high
+
+var float fvgTop     = na
+var float fvgBottom  = na
+var bool  fvgIsBull  = na
+var bool  waitingRetest = false
+var bool  retestDone    = false
+var int   fvgStartBar   = na
+var box   curFVGBox     = na
+var array<box> fvgBoxes = array.new<box>(0)
+
+// The specific candle that touched/retested the FVG zone - the engulfing
+// candle must engulf THIS candle's body, not just whatever came before it.
+var float retestOpen    = na
+var float retestClose   = na
+var float retestHigh    = na
+var float retestLow     = na
+var int   retestBarIdx  = na
+
+// --- New bullish FVG formed after an upside breakout ---
+if breakoutUpActive and bullFVGRaw and not waitingRetest
+    fvgTop        := low
+    fvgBottom     := high[2]
+    fvgIsBull     := true
+    waitingRetest := true
+    retestDone    := false
+    fvgStartBar   := bar_index[2]
+    retestOpen    := na
+    retestClose   := na
+    retestHigh    := na
+    retestLow     := na
+    retestBarIdx  := na
+    if showFVGBoxes
+        curFVGBox := box.new(bar_index[2], fvgBottom, bar_index, fvgTop,
+             border_color=color.new(color.lime, 30), bgcolor=color.new(color.lime, 85), extend=extend.none)
+        array.push(fvgBoxes, curFVGBox)
+        if array.size(fvgBoxes) > fvgMaxBoxes
+            oldbox = array.shift(fvgBoxes)
+            box.delete(oldbox)
+
+// --- New bearish FVG formed after a downside breakout ---
+if breakoutDownActive and bearFVGRaw and not waitingRetest
+    fvgTop        := low[2]
+    fvgBottom     := high
+    fvgIsBull     := false
+    waitingRetest := true
+    retestDone    := false
+    fvgStartBar   := bar_index[2]
+    retestOpen    := na
+    retestClose   := na
+    retestHigh    := na
+    retestLow     := na
+    retestBarIdx  := na
+    if showFVGBoxes
+        curFVGBox := box.new(bar_index[2], fvgBottom, bar_index, fvgTop,
+             border_color=color.new(color.red, 30), bgcolor=color.new(color.red, 85), extend=extend.none)
+        array.push(fvgBoxes, curFVGBox)
+        if array.size(fvgBoxes) > fvgMaxBoxes
+            oldbox = array.shift(fvgBoxes)
+            box.delete(oldbox)
+
+// --- Extend the live FVG box while its zone is still being watched ---
+if waitingRetest and showFVGBoxes and not na(curFVGBox)
+    box.set_right(curFVGBox, bar_index)
+
+// ============================= RETEST TRACKING ================================
+// A "retest" bar is any bar whose wick pushes back into the FVG zone. We keep
+// the MOST RECENT retest bar as the reference candle - if price keeps
+// chopping inside the zone, the reference simply updates to the latest touch.
+if waitingRetest
+    if fvgIsBull
+        if close < fvgBottom
+            waitingRetest    := false   // breakout failed / gap fully violated
+            breakoutUpActive := false
+        else if low <= fvgTop
+            retestDone   := true
+            retestOpen   := open
+            retestClose  := close
+            retestHigh   := high
+            retestLow    := low
+            retestBarIdx := bar_index
+    else
+        if close > fvgTop
+            waitingRetest       := false // breakout failed / gap fully violated
+            breakoutDownActive  := false
+        else if high >= fvgBottom
+            retestDone   := true
+            retestOpen   := open
+            retestClose  := close
+            retestHigh   := high
+            retestLow    := low
+            retestBarIdx := bar_index
+
+    // Time-based invalidation (measured from FVG formation)
+    if waitingRetest and not na(fvgStartBar) and (bar_index - fvgStartBar) > fvgMaxBars
+        waitingRetest := false
+
+// ============================= ENGULFING vs. RETEST CANDLE ======================
+// The engulfing candle must fully engulf the BODY of the specific retest
+// candle captured above, and must occur on a bar strictly after it (a candle
+// cannot engulf itself).
+canCheckEngulf = retestDone and not na(retestBarIdx) and bar_index > retestBarIdx
+
+retestBodyHi = math.max(retestOpen, retestClose)
+retestBodyLo = math.min(retestOpen, retestClose)
+
+bullEngulfRetest = canCheckEngulf and close > open and open <= retestBodyLo and close >= retestBodyHi
+bearEngulfRetest = canCheckEngulf and close < open and open >= retestBodyHi and close <= retestBodyLo
+
+// ============================= SIGNAL GENERATION ===============================
+var float stopLoss   = na
+var float takeProfit  = na
+
+buySignal  = waitingRetest and retestDone and fvgIsBull     and bullEngulfRetest
+sellSignal = waitingRetest and retestDone and not fvgIsBull and bearEngulfRetest
+
+if buySignal
+    stopLoss  := math.min(low, fvgBottom)
+    riskDist  = close - stopLoss
+    if riskDist > 0
+        takeProfit := close + riskDist * rrRatio
+        label.new(bar_index, low, "BUY\nSL " + str.tostring(stopLoss, format.mintick) + "\nTP " + str.tostring(takeProfit, format.mintick),
+             style=label.style_label_up, color=bullColor, textcolor=color.black, size=size.small)
+        line.new(bar_index, stopLoss, bar_index + slExtBars, stopLoss, color=color.new(color.red, 0), style=line.style_dashed, width=1)
+        line.new(bar_index, takeProfit, bar_index + slExtBars, takeProfit, color=color.new(color.green, 0), style=line.style_dashed, width=1)
+        if useStrategyOrders and strategy.position_size <= 0
+            strategy.entry("Long", strategy.long)
+            strategy.exit("Long Exit", "Long", stop=stopLoss, limit=takeProfit)
+    waitingRetest    := false
+    breakoutUpActive := false
+
+if sellSignal
+    stopLoss  := math.max(high, fvgTop)
+    riskDist  = stopLoss - close
+    if riskDist > 0
+        takeProfit := close - riskDist * rrRatio
+        label.new(bar_index, high, "SELL\nSL " + str.tostring(stopLoss, format.mintick) + "\nTP " + str.tostring(takeProfit, format.mintick),
+             style=label.style_label_down, color=bearColor, textcolor=color.white, size=size.small)
+        line.new(bar_index, stopLoss, bar_index + slExtBars, stopLoss, color=color.new(color.red, 0), style=line.style_dashed, width=1)
+        line.new(bar_index, takeProfit, bar_index + slExtBars, takeProfit, color=color.new(color.green, 0), style=line.style_dashed, width=1)
+        if useStrategyOrders and strategy.position_size >= 0
+            strategy.entry("Short", strategy.short)
+            strategy.exit("Short Exit", "Short", stop=stopLoss, limit=takeProfit)
+    waitingRetest      := false
+    breakoutDownActive := false
+
+// ============================= ALERTS ===========================================
+alertcondition(buySignal,  title="FVG Bullish Engulfing BUY",  message="BUY: FVG retest + bullish engulfing confirmed")
+alertcondition(sellSignal, title="FVG Bearish Engulfing SELL", message="SELL: FVG retest + bearish engulfing confirmed")
+
+// ============================= DEBUG PLOTS (optional, invisible by default) ====
+plot(primaryHigh, title="Primary Level High (debug)", color=na)
+plot(primaryLow,  title="Primary Level Low (debug)",  color=na)
